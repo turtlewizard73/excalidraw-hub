@@ -34,3 +34,12 @@ test('sortDrawings puts versions first, highest first, marks latest, then the re
     ['ai-map_v2_x.excalidraw', true], ['ai-map_v0.excalidraw', false],
     ['board-before-ai-map.excalidraw', false], ['board-before-clear.excalidraw', false]]);
 });
+
+test('huge version numbers are not versions; long names still fit', () => {
+  assert.equal(parseDrawing('p', 'p_v1000000000000000000000.excalidraw').version, null);
+  assert.equal(nextVersion('p', ['p_v1000000000000000000000.excalidraw', 'p_v4.excalidraw']), 5);
+  const project = 'p'.repeat(110);
+  const name = saveName(project, 12, 'a long label that will not fit');
+  assert.equal(isSafeName(name.slice(0, -'.excalidraw'.length)), true, name);
+  assert.equal(saveName('q'.repeat(121), 0, 'label').startsWith('q'.repeat(121) + '_v0'), true);
+});

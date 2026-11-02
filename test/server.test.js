@@ -44,6 +44,11 @@ beforeEach(async () => {
   const canvasUrl = await listen(canvas.server);
   hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), canvasPublicUrl: 'http://localhost:3000' });
   base = await listen(hub);
+  const port = new URL(base).port;
+  // Re-create with the Host guard on, as main.js configures it.
+  hub.close();
+  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
+  await new Promise((r) => hub.listen(Number(port), '127.0.0.1', r));
 });
 afterEach(() => { canvas.server.close(); hub.close(); });
 
@@ -123,4 +128,44 @@ test('status reports an unreachable canvas', async () => {
   const s = await (await fetch(lbase + '/api/status')).json();
   assert.equal(s.canvas, 'unreachable');
   lone.close();
+});
+
+test('deleting the loaded drawing makes the canvas count as unsaved', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.equal((await get('/api/status')).dirty, false);
+  await post('/api/delete', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const s = await get('/api/status');
+  assert.equal(s.current, null);
+  assert.equal(s.dirty, true);
+  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  assert.equal((await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' })).status, 409, 'load asks before wiping it');
+});
+
+test('same-origin posts pass, oversized bodies are refused', async () => {
+  const res = await post('/api/save', { project: 'budgeting' }, { origin: base });
+  assert.equal(res.status, 200);
+  const big = await post('/api/save', { project: 'budgeting', label: 'x'.repeat(70000) });
+  assert.equal(big.status, 413);
+});
+
+test('concurrent saves get distinct versions', async () => {
+  canvas.state.elements.set('a', rect('a'));
+  const results = await Promise.all([1, 2, 3].map(() => post('/api/save', { project: 'budgeting' }).then((r) => r.json())));
+  assert.deepEqual(results.map((r) => r.current.file).sort(), ['budgeting_v1.excalidraw', 'budgeting_v2.excalidraw', 'budgeting_v3.excalidraw']);
+});
+
+test('after a browser sync the strict anchor is used through the API', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  for (const [id, e] of canvas.state.elements) canvas.state.elements.set(id, { ...e, source: 'frontend_sync', boundElements: [], width: 10 });
+  assert.equal((await get('/api/status')).dirty, false, 'normalized sync is clean and anchors');
+  const a = canvas.state.elements.get('a');
+  canvas.state.elements.set('a', { ...a, boundElements: [{ id: 'z', type: 'arrow' }] });
+  assert.equal((await get('/api/status')).dirty, true, 'strict compare now sees boundElements changes');
+});
+
+test('the page is not frameable and only frames the canvas', async () => {
+  const res = await fetch(base + '/');
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.match(res.headers.get('content-security-policy'), /frame-src http:\/\/localhost:3000;/);
 });

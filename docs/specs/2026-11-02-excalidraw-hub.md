@@ -65,6 +65,10 @@ Each decision states what it is based on.
 ### Safety
 - Names (project, file base) must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$` and contain no `..`. Resolved paths must stay under the root, and symlinks are rejected (`lstat`).
 - The port is published on host `127.0.0.1` only (the server binds `0.0.0.0` inside the container). A `Host` allowlist (`HUB_ALLOWED_HOSTS`, default `127.0.0.1:<port>,localhost:<port>`) blocks DNS rebinding. State-changing requests require `Content-Type: application/json` and, when an `Origin` header is present, the hub's own origin. Based on: a web page could otherwise POST to localhost and delete drawings (CSRF).
+- The page sends `X-Frame-Options: DENY` and a CSP (`frame-ancestors 'none'`, `frame-src` = the canvas origin only), against clickjacking.
+- Load, save, rename and delete run one at a time (a promise queue), because they share the baseline and the canvas.
+- Rename and save move files all-or-nothing: every destination is hard-linked first (fails if it exists), then the sources are unlinked. A `.png` already at the rename destination is a conflict, even when the source has none.
+- **Accepted risk:** the canvas on `:3000` has no CSRF or Host guard of its own (upstream). A web page could rewrite the shared canvas. The hub cannot fix this. Saving always writes a new version, so nothing on disk is lost.
 - Container runs as the host user (`UID`/`GID` from `.env`, default 1000) so files in the repo aren't root-owned.
 
 ### Docker and networking

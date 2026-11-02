@@ -1,5 +1,6 @@
 // Drawing files under one root folder (the docs/drawings mount). Every path goes through `resolve`.
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { EXT, isSafeName, sortDrawings } from './names.js';
 
@@ -28,13 +29,31 @@ export function createStore(rootDir) {
   const exists = (p) => fs.lstat(p).then(() => true, () => false);
   const pngOf = (p) => p.slice(0, -EXT.length) + '.png';
 
-  /** Move src to dest without ever overwriting dest (link fails if dest exists). */
-  async function moveExclusive(src, dest) {
+  const isFile = (p) => fs.lstat(p).then((st) => st.isFile(), () => false);
+
+  /** Link src to dest; never overwrites (link fails if dest exists). */
+  async function linkExclusive(src, dest) {
     try { await fs.link(src, dest); } catch (e) {
       if (e.code === 'EEXIST') throw new StoreError(409, `${path.basename(dest)} already exists`);
       throw e;
     }
-    await fs.unlink(src);
+  }
+
+  /** Move several src->dest pairs all-or-nothing: link every dest first, then unlink the sources. */
+  async function moveAll(pairs) {
+    const done = [];
+    try {
+      for (const [src, dest] of pairs) { await linkExclusive(src, dest); done.push(dest); }
+    } catch (e) {
+      for (const dest of done) await fs.unlink(dest).catch(() => {});
+      throw e;
+    }
+    for (const [src] of pairs) await fs.unlink(src);
+  }
+
+  /** A regular file (not a dir, FIFO or symlink), or 404. */
+  async function requireFile(p, label) {
+    if (!(await isFile(p))) throw new StoreError(404, `${label} not found`);
   }
 
   return {
@@ -60,41 +79,40 @@ export function createStore(rootDir) {
 
     async read(project, file) {
       const p = await resolve(project, file);
-      const text = await fs.readFile(p, 'utf8').catch((e) => {
-        if (e.code === 'ENOENT') throw new StoreError(404, `${project}/${file} not found`);
-        throw e;
-      });
-      try { return JSON.parse(text); } catch { throw new StoreError(422, `${project}/${file} is not valid JSON`); }
+      await requireFile(p, `${project}/${file}`);
+      let doc;
+      try { doc = JSON.parse(await fs.readFile(p, 'utf8')); } catch { throw new StoreError(422, `${project}/${file} is not valid JSON`); }
+      if (!doc || typeof doc !== 'object' || !Array.isArray(doc.elements)) throw new StoreError(422, `${project}/${file} has no elements array`);
+      return doc;
     },
 
     /** Write a new file; never overwrites. Creates the project folder if needed. */
     async create(project, file, doc) {
       const p = await resolve(project, file);
       await fs.mkdir(path.dirname(p), { recursive: true });
-      const tmp = path.join(path.dirname(p), `.${file}.${process.pid}.${Date.now()}.tmp`);
+      const tmp = path.join(path.dirname(p), `.${file}.${crypto.randomUUID()}.tmp`);
       await fs.writeFile(tmp, JSON.stringify(doc, null, 2) + '\n', { flag: 'wx' });
-      try { await moveExclusive(tmp, p); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
+      try { await moveAll([[tmp, p]]); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
     },
 
     /** Rename within the project; the same-named .png moves along. */
     async rename(project, file, newFile) {
       const src = await resolve(project, file);
       const dest = await resolve(project, newFile);
-      if (!(await exists(src))) throw new StoreError(404, `${project}/${file} not found`);
+      await requireFile(src, `${project}/${file}`);
       if (src === dest) return;
-      if (await exists(pngOf(src)) && await exists(pngOf(dest))) throw new StoreError(409, `${path.basename(pngOf(dest))} already exists`);
-      await moveExclusive(src, dest);
-      if (await exists(pngOf(src))) await moveExclusive(pngOf(src), pngOf(dest));
+      for (const p of [dest, pngOf(dest)]) if (await exists(p)) throw new StoreError(409, `${path.basename(p)} already exists`);
+      const pngExists = await exists(pngOf(src));
+      if (pngExists && !(await isFile(pngOf(src)))) throw new StoreError(409, `${path.basename(pngOf(src))} is not a regular file`);
+      await moveAll(pngExists ? [[src, dest], [pngOf(src), pngOf(dest)]] : [[src, dest]]);
     },
 
     /** Delete a drawing and its same-named .png. */
     async remove(project, file) {
       const p = await resolve(project, file);
-      await fs.unlink(p).catch((e) => {
-        if (e.code === 'ENOENT') throw new StoreError(404, `${project}/${file} not found`);
-        throw e;
-      });
-      await fs.unlink(pngOf(p)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+      await requireFile(p, `${project}/${file}`);
+      await fs.unlink(p);
+      if (await isFile(pngOf(p))) await fs.unlink(pngOf(p));
     },
   };
 }

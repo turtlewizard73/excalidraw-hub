@@ -26,6 +26,15 @@ async function readJson(req) {
  */
 export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
   const baseline = new Baseline();
+  // One state-changing request at a time: load/save/rename/delete share the baseline and the canvas.
+  let queue = Promise.resolve();
+  const serial = (fn) => (body) => { const run = queue.then(() => fn(body)); queue = run.catch(() => {}); return run; };
+  let frameSrc = "'none'";
+  try { frameSrc = new URL(canvasPublicUrl).origin; } catch { /* no canvas URL: nothing may be framed */ }
+  const pageHeaders = {
+    'x-frame-options': 'DENY',
+    'content-security-policy': `default-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+  };
   const same = (a, b) => a && b && a.project === b.project && a.file === b.file;
 
   const routes = {
@@ -41,16 +50,15 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       }
     },
 
-    'POST /api/load': async ({ project, file, force }) => {
+    'POST /api/load': serial(async ({ project, file, force }) => {
       const doc = await store.read(project, file);
-      if (!Array.isArray(doc.elements)) throw new HttpError(422, `${project}/${file} has no elements array`);
       if (!force && baseline.isDirty(await canvas.elements())) throw new HttpError(409, 'the canvas has unsaved changes', { dirty: true });
       await canvas.load(doc);
       baseline.set({ project, file }, doc.elements, doc.appState);
       return { current: baseline.current, elementCount: doc.elements.filter((e) => !e.isDeleted).length };
-    },
+    }),
 
-    'POST /api/save': async ({ project, label }) => {
+    'POST /api/save': serial(async ({ project, label }) => {
       if (!isSafeName(project)) throw new HttpError(400, `invalid project name: ${JSON.stringify(project)}`);
       if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
       const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
@@ -66,21 +74,22 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
           if (!(e instanceof StoreError && e.status === 409) || attempt >= 2) throw e;
         }
       }
-    },
+    }),
 
-    'POST /api/rename': async ({ project, file, newBase }) => {
+    'POST /api/rename': serial(async ({ project, file, newBase }) => {
       if (typeof newBase !== 'string' || !isSafeName(newBase)) throw new HttpError(400, `invalid new name: ${JSON.stringify(newBase)}`);
       const newFile = newBase + EXT;
       await store.rename(project, file, newFile);
       if (same(baseline.current, { project, file })) baseline.current = { project, file: newFile };
       return { project, file: newFile, current: baseline.current };
-    },
+    }),
 
-    'POST /api/delete': async ({ project, file }) => {
+    // Deleting the loaded drawing forgets the baseline: the canvas content now exists nowhere on disk, so it is unsaved.
+    'POST /api/delete': serial(async ({ project, file }) => {
       await store.remove(project, file);
-      if (same(baseline.current, { project, file })) baseline.current = null;
+      if (same(baseline.current, { project, file })) baseline.reset();
       return { deleted: { project, file }, current: baseline.current };
-    },
+    }),
   };
 
   async function handle(req, res) {
@@ -88,8 +97,9 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     if (allowedHosts && !allowedHosts.includes(req.headers.host)) throw new HttpError(403, 'unexpected Host header');
     if (req.method === 'GET' && STATIC[url.pathname]) {
       const [name, type] = STATIC[url.pathname];
-      res.writeHead(200, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-cache' });
-      return res.end(await fs.readFile(path.join(PUBLIC, name)));
+      const content = await fs.readFile(path.join(PUBLIC, name));
+      res.writeHead(200, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-cache', ...pageHeaders });
+      return res.end(content);
     }
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) throw new HttpError(404, 'not found');
@@ -106,11 +116,12 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
   return http.createServer((req, res) => {
     handle(req, res).then((data) => {
       if (res.headersSent) return;
-      res.writeHead(200, { 'content-type': 'application/json' });
+      res.writeHead(200, { 'content-type': 'application/json', 'x-frame-options': 'DENY' });
       res.end(JSON.stringify(data));
     }, (e) => {
       const status = e.status ?? 500;
       if (status === 500) console.error(e);
+      if (res.headersSent) return res.end();
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: status === 500 ? 'internal error' : e.message, ...(e.extra ?? {}) }));
     });

@@ -27,10 +27,10 @@ test('listProjects lists folders with sorted drawings, latest and png flags', as
 });
 
 test('create writes a new file, creates the folder, and never overwrites', async () => {
-  await store.create('budgeting', 'budgeting_v2.excalidraw', { a: 1 });
-  assert.deepEqual(await store.read('budgeting', 'budgeting_v2.excalidraw'), { a: 1 });
-  await assert.rejects(store.create('budgeting', 'budgeting_v2.excalidraw', { a: 2 }), status(409));
-  assert.deepEqual(await store.read('budgeting', 'budgeting_v2.excalidraw'), { a: 1 });
+  await store.create('budgeting', 'budgeting_v2.excalidraw', { elements: [1] });
+  assert.deepEqual(await store.read('budgeting', 'budgeting_v2.excalidraw'), { elements: [1] });
+  await assert.rejects(store.create('budgeting', 'budgeting_v2.excalidraw', { elements: [2] }), status(409));
+  assert.deepEqual(await store.read('budgeting', 'budgeting_v2.excalidraw'), { elements: [1] });
   await store.create('new-project', 'new-project_v0.excalidraw', {});
   assert.deepEqual(await ls('new-project'), ['new-project_v0.excalidraw'], 'no temp files left');
   assert.deepEqual(await ls('budgeting'), ['budgeting_v0_plan.excalidraw', 'budgeting_v1_plan_with_proposal.excalidraw', 'budgeting_v2.excalidraw']);
@@ -73,4 +73,29 @@ test('symlinked projects and files are rejected', async () => {
   await assert.rejects(store.create('linked', 'new.excalidraw', {}), status(400));
   assert.deepEqual(await fs.readdir(outside), ['secret.excalidraw']);
   assert.deepEqual((await store.listProjects()).map((p) => p.name), ['ai-map', 'budgeting'], 'symlinked folder not listed');
+});
+
+test('rename refuses an orphan png at the destination and changes nothing', async () => {
+  await write('budgeting/budgeting_v1_final.png', 'orphan');
+  await assert.rejects(store.rename('budgeting', 'budgeting_v1_plan_with_proposal.excalidraw', 'budgeting_v1_final.excalidraw'), status(409));
+  assert.deepEqual(await ls('budgeting'), ['budgeting_v0_plan.excalidraw', 'budgeting_v1_final.png', 'budgeting_v1_plan_with_proposal.excalidraw']);
+});
+
+test('rename is all-or-nothing when the png cannot move', async () => {
+  await fs.mkdir(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'));
+  await assert.rejects(store.rename('budgeting', 'budgeting_v0_plan.excalidraw', 'budgeting_v0_x.excalidraw'), status(409));
+  assert.deepEqual(await ls('budgeting'), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png', 'budgeting_v1_plan_with_proposal.excalidraw']);
+});
+
+test('non-regular files and bad shapes are refused cleanly', async () => {
+  await fs.mkdir(path.join(dir, 'ai-map', 'dir.excalidraw'));
+  await assert.rejects(store.read('ai-map', 'dir.excalidraw'), status(404));
+  await assert.rejects(store.remove('ai-map', 'dir.excalidraw'), status(404));
+  await write('ai-map/null.excalidraw', 'null');
+  await assert.rejects(store.read('ai-map', 'null.excalidraw'), status(422));
+  await write('ai-map/bad.excalidraw', '{not json');
+  await assert.rejects(store.read('ai-map', 'bad.excalidraw'), status(422));
+  await fs.mkdir(path.join(dir, 'ai-map', 'board-before-clear.png'));
+  await store.remove('ai-map', 'board-before-clear.excalidraw');
+  assert.equal((await fs.lstat(path.join(dir, 'ai-map', 'board-before-clear.png'))).isDirectory(), true, 'png dir left alone');
 });

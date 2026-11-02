@@ -1,5 +1,6 @@
 // Pure naming rules for docs/drawings: <project>/<project>_v<i>[_<label>].excalidraw (parent repo CLAUDE.md, Drawings).
 export const EXT = '.excalidraw';
+export const MAX_NAME = 121;
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
 
 /** A folder or file base name that is safe to join under the drawings root. */
@@ -13,7 +14,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function parseDrawing(project, file) {
   if (!file.endsWith(EXT)) return null;
   const base = file.slice(0, -EXT.length);
-  const m = new RegExp(`^${escapeRe(project)}_v(\\d+)(?:_(.+))?$`).exec(base);
+  const m = new RegExp(`^${escapeRe(project)}_v(\\d{1,9})(?:_(.+))?$`).exec(base);
   return { file, base, version: m ? Number(m[1]) : null, label: m ? (m[2] ?? null) : null };
 }
 
@@ -23,8 +24,10 @@ export function nextVersion(project, files) {
 }
 
 export function saveName(project, version, label) {
-  const slug = String(label ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
-  return `${project}_v${version}${slug ? `_${slug}` : ''}${EXT}`;
+  const stem = `${project}_v${version}`;
+  const room = Math.min(60, MAX_NAME - stem.length - 1);
+  const slug = room > 0 ? String(label ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, room).replace(/_+$/, '') : '';
+  return `${stem}${slug ? `_${slug}` : ''}${EXT}`;
 }
 
 /** Versioned drawings first (highest first, the highest marked latest), then off-scheme files by name. */
