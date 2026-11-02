@@ -1,0 +1,12 @@
+{
+  "name": "excalidraw-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sidebar hub for the shared Excalidraw canvas: list, load, save, rename, delete drawings in docs/drawings.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/"
+  }
+}
