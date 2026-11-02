@@ -169,3 +169,12 @@ test('the page is not frameable and only frames the canvas', async () => {
   assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.match(res.headers.get('content-security-policy'), /frame-src http:\/\/localhost:3000;/);
 });
+
+test('save into a project name too long for a version suffix is a clear 400', async () => {
+  canvas.state.elements.set('a', rect('a'));
+  const ok = await post('/api/save', { project: 'p'.repeat(110), label: 'some label' });
+  assert.equal(ok.status, 200);
+  const res = await post('/api/save', { project: 'p'.repeat(111) });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /too long/);
+});

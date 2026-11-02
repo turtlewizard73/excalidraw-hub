@@ -3,7 +3,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXT, isSafeName, nextVersion, saveName } from './names.js';
+import { EXT, MAX_NAME, isSafeName, nextVersion, saveName } from './names.js';
 import { Baseline, buildDocument, hasShorthand } from './scene.js';
 import { StoreError } from './store.js';
 
@@ -60,6 +60,8 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
 
     'POST /api/save': serial(async ({ project, label }) => {
       if (!isSafeName(project)) throw new HttpError(400, `invalid project name: ${JSON.stringify(project)}`);
+      // Leave room for `_v<up to 9 digits>` within the name limit.
+      if (project.length > MAX_NAME - 11) throw new HttpError(400, `project name too long to save into (max ${MAX_NAME - 11} characters)`);
       if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
       const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
       if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');

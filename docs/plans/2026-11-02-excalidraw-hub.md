@@ -20,13 +20,13 @@ Spec: `docs/specs/2026-11-02-excalidraw-hub.md`. Repo: `sandbox/excalidraw-hub` 
 - Real stack: `docker compose up -d` then `curl 127.0.0.1:3080/api/projects`. No load/save against port 3000.
 
 ## Outcome
-Done 2026-11-03. All six features work against the running containers: 33 unit/API tests and 9 Playwright e2e tests pass (`scripts/e2e.sh`). The default `docker compose up` stack lists the real `docs/drawings` and reaches the `:3000` canvas; it was checked read-only, with no load or save against the shared canvas.
+Done 2026-11-03. All six features work against the running containers: 34 unit/API tests and 9 Playwright e2e tests pass, both on the test stack (`scripts/e2e.sh`) and on the production `compose.yaml` run in isolation (spare port 3081, own canvas on 3100, fixture copy; saved files owned by uid 1000, hard links work on the bind mount). The default `docker compose up` stack lists the real `docs/drawings` and reaches the `:3000` canvas; it was checked read-only, with no load or save against the shared canvas.
 
 **Differed from the plan**
 - Networking: planned `network_mode: host`. Docker here is Docker Desktop, where host mode binds inside its VM, so the hub was unreachable from WSL even though e2e passed (all test containers shared the VM network). Switched to published `127.0.0.1` ports and `host.docker.internal`; tests use compose service names.
 - Unsaved detection became a hybrid of tolerant and strict comparison. A plain hash showed "unsaved" after any click, because the tab normalizes the scene on its first sync.
 - The beforeunload e2e checks the handler and a real navigation prompt. Closing the page did not raise the dialog in headless Chromium.
-- Review (independent agent, Fable) found no traversal, XSS or CSRF hole. It confirmed 8 lower issues, all fixed with tests: delete of the loaded drawing kept "Saved"; orphan png at the rename destination; half-finished rename; frameable page; huge version numbers; long names; non-regular files and bad shapes; test gaps. Also fixed: request serialization, random temp names, and the static-file error path.
+- Review (independent agent, Fable) found no traversal, XSS or CSRF hole. It confirmed 8 lower issues, all fixed with tests: delete of the loaded drawing kept "Saved"; orphan png at the rename destination; half-finished rename; frameable page; huge version numbers; long labels (and a clear 400 for project names too long to version); non-regular files and bad shapes; test gaps. Also fixed: request serialization, random temp names, and the static-file error path.
 
 **Learned**
 - Load and save through the raw canvas REST API are lossless. The MCP's scene export is not lossless for browser-made files.

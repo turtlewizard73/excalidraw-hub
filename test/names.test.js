@@ -41,5 +41,4 @@ test('huge version numbers are not versions; long names still fit', () => {
   const project = 'p'.repeat(110);
   const name = saveName(project, 12, 'a long label that will not fit');
   assert.equal(isSafeName(name.slice(0, -'.excalidraw'.length)), true, name);
-  assert.equal(saveName('q'.repeat(121), 0, 'label').startsWith('q'.repeat(121) + '_v0'), true);
 });
