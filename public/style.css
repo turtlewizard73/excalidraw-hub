@@ -1,0 +1,26 @@
+* { box-sizing: border-box; }
+body { margin: 0; height: 100vh; display: flex; font: 14px system-ui, sans-serif; color: #1e1e1e; }
+#sidebar { width: 280px; overflow-y: auto; border-right: 1px solid #ddd; background: #fafafa; padding: 8px 10px; }
+#sidebar h1 { font-size: 16px; margin: 4px 0 10px; }
+details { margin-bottom: 6px; }
+summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+ul { list-style: none; margin: 4px 0 0; padding: 0; }
+li { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; }
+li.active { background: #e3ecff; }
+li button.open { flex: 1; text-align: left; background: none; border: 0; padding: 2px; cursor: pointer; font: inherit; overflow-wrap: anywhere; }
+li button.open:hover { text-decoration: underline; }
+li .act { visibility: hidden; border: 0; background: none; cursor: pointer; padding: 2px 4px; color: #555; }
+li:hover .act, li.active .act { visibility: visible; }
+.tag { font-size: 11px; border-radius: 3px; padding: 0 4px; background: #d3f9d8; color: #2b8a3e; }
+.tag.plain { background: #eee; color: #666; }
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+header { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #ddd; flex-wrap: wrap; }
+#current { font-weight: 600; }
+.badge { font-size: 12px; border-radius: 10px; padding: 1px 8px; }
+.badge.dirty { background: #ffe3e3; color: #c92a2a; }
+.badge.clean { background: #d3f9d8; color: #2b8a3e; }
+.badge.offline { background: #fff3bf; color: #8f6b00; }
+#save-form { display: flex; gap: 4px; margin-left: auto; }
+#save-form input { width: 140px; }
+#message.error { color: #c92a2a; }
+iframe { flex: 1; border: 0; width: 100%; }

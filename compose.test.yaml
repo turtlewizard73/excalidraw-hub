@@ -1,0 +1,35 @@
+# Isolated test stack: own canvas on :3100, hub on :3180 over a fixture copy, Playwright runner.
+# Never touches parent repo's canvas (:3000) or docs/drawings. Run via scripts/e2e.sh.
+name: excalidraw-hub-test
+services:
+  canvas:
+    image: ghcr.io/yctimlin/mcp_excalidraw-canvas:2.1.2
+    ports:
+      - "127.0.0.1:3100:3000"
+  hub:
+    build: .
+    network_mode: host
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      HUB_PORT: "3180"
+      CANVAS_URL: http://127.0.0.1:3100
+      CANVAS_PUBLIC_URL: http://127.0.0.1:3100
+      DRAWINGS_DIR: /data
+    volumes:
+      - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data"
+    depends_on: [canvas]
+  e2e:
+    build:
+      context: e2e
+    profiles: [e2e]
+    user: "${UID:-1000}:${GID:-1000}"
+    network_mode: host
+    ipc: host
+    environment:
+      HUB_URL: http://127.0.0.1:3180
+      CANVAS_URL: http://127.0.0.1:3100
+      DATA_DIR: /data
+      HOME: /tmp
+    volumes:
+      - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data:ro"
+      - "./test-results:/e2e/test-results"

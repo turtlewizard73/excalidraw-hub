@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Excalidraw hub</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <h1>Drawings</h1>
+    <div id="projects" aria-live="polite">Loading…</div>
+  </aside>
+  <main>
+    <header>
+      <span id="current" data-testid="current">No drawing loaded</span>
+      <span id="dirty" data-testid="dirty" class="badge"></span>
+      <form id="save-form">
+        <input id="save-project" data-testid="save-project" list="project-names" placeholder="project" required>
+        <datalist id="project-names"></datalist>
+        <input id="save-label" data-testid="save-label" placeholder="label (optional)">
+        <button type="submit" data-testid="save">Save new version</button>
+      </form>
+      <span id="message" data-testid="message" role="status"></span>
+    </header>
+    <iframe id="canvas" title="Excalidraw canvas"></iframe>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

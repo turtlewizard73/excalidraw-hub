@@ -1,0 +1,17 @@
+# Excalidraw hub. Start: `docker compose up -d` here, with parent repo's canvas already up (`docker compose up -d` at the parent repo root).
+# Open http://localhost:3080. See docs/setup.md.
+services:
+  hub:
+    build: .
+    # Host network, like .claude/mcp/excalidraw.sh: reaches the canvas on 127.0.0.1:3000; the server binds 127.0.0.1 only.
+    network_mode: host
+    # Host user, so saved drawings are not root-owned in the repo (.env sets UID/GID; bash does not export them).
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      HUB_PORT: "${HUB_PORT:-3080}"
+      CANVAS_URL: "${CANVAS_URL:-http://127.0.0.1:3000}"          # server -> canvas REST
+      CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
+      DRAWINGS_DIR: /data
+    volumes:
+      - "${HUB_DRAWINGS:-../../docs/drawings}:/data"
+    restart: unless-stopped
