@@ -64,12 +64,13 @@ Each decision states what it is based on.
 
 ### Safety
 - Names (project, file base) must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$` and contain no `..`. Resolved paths must stay under the root, and symlinks are rejected (`lstat`).
-- Server binds `127.0.0.1`. State-changing requests require `Content-Type: application/json` and, when an `Origin` header is present, the hub's own origin. Based on: a web page could otherwise POST to localhost and delete drawings (CSRF).
+- The port is published on host `127.0.0.1` only (the server binds `0.0.0.0` inside the container). A `Host` allowlist (`HUB_ALLOWED_HOSTS`, default `127.0.0.1:<port>,localhost:<port>`) blocks DNS rebinding. State-changing requests require `Content-Type: application/json` and, when an `Origin` header is present, the hub's own origin. Based on: a web page could otherwise POST to localhost and delete drawings (CSRF).
 - Container runs as the host user (`UID`/`GID` from `.env`, default 1000) so files in the repo aren't root-owned.
 
 ### Docker and networking
-- `compose.yaml`: one `hub` service, `network_mode: host` (as `.claude/mcp/excalidraw.sh` does), drawings mounted from `${DRAWINGS_DIR:-../../docs/drawings}`. Env: `CANVAS_URL` (server → canvas), `CANVAS_PUBLIC_URL` (iframe src), `HUB_PORT` (3080). It expects the parent repo canvas to be running.
-- `compose.test.yaml`: an isolated canvas on 3100, a hub on 3180 with a fixture copy, and a Playwright runner (image and npm package both `1.56.1`). Tests never touch port 3000 or the real drawings.
+- `compose.yaml`: one `hub` service on the default bridge network, published on `127.0.0.1:3080`. It reaches the canvas at `http://host.docker.internal:3000` (`extra_hosts: host-gateway`). The iframe uses `http://localhost:3000`. Drawings are mounted from `${HUB_DRAWINGS:-../../docs/drawings}`. It expects the parent repo canvas to be running.
+- **Not host networking.** This Docker is Docker Desktop (`docker info`): `network_mode: host` binds inside its VM, so WSL and Windows could not reach the hub (observed 2026-11-02). Published ports are forwarded to WSL, as the canvas on `:3000` shows.
+- `compose.test.yaml`: its own canvas, a hub over a fixture copy and a Playwright runner (image and npm package both `1.56.1`), talking over the compose network by service name. Tests never touch port 3000 or the real drawings.
 
 ## Out of scope
 - Overwrite-save, a new-project button separate from save, moving drawings between projects.

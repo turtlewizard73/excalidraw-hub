@@ -1,5 +1,6 @@
-# Isolated test stack: own canvas on :3100, hub on :3180 over a fixture copy, Playwright runner.
-# Never touches parent repo's canvas (:3000) or docs/drawings. Run via scripts/e2e.sh.
+# Isolated test stack: own canvas, hub over a fixture copy, Playwright runner, all on the compose network.
+# Published on 127.0.0.1:3100 / :3180 for debugging only. Never touches parent repo's canvas (:3000) or docs/drawings.
+# Run via scripts/e2e.sh.
 name: excalidraw-hub-test
 services:
   canvas:
@@ -8,12 +9,15 @@ services:
       - "127.0.0.1:3100:3000"
   hub:
     build: .
-    network_mode: host
+    ports:
+      - "127.0.0.1:3180:3180"
     user: "${UID:-1000}:${GID:-1000}"
     environment:
+      HUB_HOST: 0.0.0.0
       HUB_PORT: "3180"
-      CANVAS_URL: http://127.0.0.1:3100
-      CANVAS_PUBLIC_URL: http://127.0.0.1:3100
+      HUB_ALLOWED_HOSTS: "hub:3180,127.0.0.1:3180,localhost:3180"
+      CANVAS_URL: http://canvas:3000
+      CANVAS_PUBLIC_URL: http://canvas:3000
       DRAWINGS_DIR: /data
     volumes:
       - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data"
@@ -23,13 +27,13 @@ services:
       context: e2e
     profiles: [e2e]
     user: "${UID:-1000}:${GID:-1000}"
-    network_mode: host
     ipc: host
     environment:
-      HUB_URL: http://127.0.0.1:3180
-      CANVAS_URL: http://127.0.0.1:3100
+      HUB_URL: http://hub:3180
+      CANVAS_URL: http://canvas:3000
       DATA_DIR: /data
       HOME: /tmp
     volumes:
       - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data:ro"
       - "./test-results:/e2e/test-results"
+    depends_on: [hub]

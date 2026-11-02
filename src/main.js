@@ -13,7 +13,8 @@ const server = createServer({
   store: createStore(drawings),
   canvas: createCanvas(canvasUrl),
   canvasPublicUrl,
-  allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
+  // Host header allowlist (DNS-rebinding guard). Default: the loopback names a local browser uses.
+  allowedHosts: process.env.HUB_ALLOWED_HOSTS ? process.env.HUB_ALLOWED_HOSTS.split(',').map((h) => h.trim()) : [`127.0.0.1:${port}`, `localhost:${port}`],
 });
 server.listen(port, host, () => console.log(`excalidraw-hub on http://${host}:${port} (drawings ${drawings}, canvas ${canvasUrl})`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => process.exit(0)));

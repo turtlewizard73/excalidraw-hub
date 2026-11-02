@@ -3,13 +3,18 @@
 services:
   hub:
     build: .
-    # Host network, like .claude/mcp/excalidraw.sh: reaches the canvas on 127.0.0.1:3000; the server binds 127.0.0.1 only.
-    network_mode: host
+    ports:
+      - "127.0.0.1:${HUB_PORT:-3080}:${HUB_PORT:-3080}"   # host loopback only
+    # The canvas is published on the host's 127.0.0.1:3000; host-gateway reaches it from the container
+    # (Docker Desktop and Linux engines alike; network_mode: host does not reach WSL under Docker Desktop).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Host user, so saved drawings are not root-owned in the repo (.env sets UID/GID; bash does not export them).
     user: "${UID:-1000}:${GID:-1000}"
     environment:
+      HUB_HOST: 0.0.0.0
       HUB_PORT: "${HUB_PORT:-3080}"
-      CANVAS_URL: "${CANVAS_URL:-http://127.0.0.1:3000}"          # server -> canvas REST
+      CANVAS_URL: "${CANVAS_URL:-http://host.docker.internal:3000}"     # server -> canvas REST
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
       DRAWINGS_DIR: /data
     volumes:
