@@ -67,7 +67,9 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');
       const doc = buildDocument(elements, files, baseline.appState);
       for (let attempt = 0; ; attempt++) {
-        const file = saveName(project, nextVersion(project, await store.files(project)), label);
+        const version = nextVersion(project, await store.files(project));
+        if (version > 999999999) throw new HttpError(400, `${project} has reached the highest version number (v999999999)`);
+        const file = saveName(project, version, label);
         try {
           await store.create(project, file, doc);
           baseline.set({ project, file }, doc.elements, doc.appState, elements);
@@ -89,7 +91,7 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     // Deleting the loaded drawing forgets the baseline: the canvas content now exists nowhere on disk, so it is unsaved.
     'POST /api/delete': serial(async ({ project, file }) => {
       await store.remove(project, file);
-      if (same(baseline.current, { project, file })) baseline.reset();
+      if (same(baseline.current, { project, file })) { const { appState } = baseline; baseline.reset(); baseline.appState = appState; }
       return { deleted: { project, file }, current: baseline.current };
     }),
   };

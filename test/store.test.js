@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createStore } from '../src/store.js';
+import { createStore, moveAll } from '../src/store.js';
 
 let dir, store;
 const write = async (rel, body = '{"elements":[]}') => { await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true }); await fs.writeFile(path.join(dir, rel), body); };
@@ -98,4 +98,13 @@ test('non-regular files and bad shapes are refused cleanly', async () => {
   await fs.mkdir(path.join(dir, 'ai-map', 'board-before-clear.png'));
   await store.remove('ai-map', 'board-before-clear.excalidraw');
   assert.equal((await fs.lstat(path.join(dir, 'ai-map', 'board-before-clear.png'))).isDirectory(), true, 'png dir left alone');
+});
+
+test('moveAll rolls back earlier links when a later one fails', async () => {
+  const p = (f) => path.join(dir, 'budgeting', f);
+  await write('budgeting/a.png', 'a');
+  await write('budgeting/taken.png', 'keep');
+  await assert.rejects(moveAll([[p('budgeting_v0_plan.excalidraw'), p('moved.excalidraw')], [p('a.png'), p('taken.png')]]), (e) => e.status === 409);
+  assert.deepEqual(await ls('budgeting'), ['a.png', 'budgeting_v0_plan.excalidraw', 'budgeting_v1_plan_with_proposal.excalidraw', 'taken.png']);
+  assert.equal(await fs.readFile(p('taken.png'), 'utf8'), 'keep');
 });

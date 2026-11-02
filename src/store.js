@@ -8,6 +8,26 @@ export class StoreError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+/** Link src to dest; never overwrites (link fails if dest exists). */
+async function linkExclusive(src, dest) {
+  try { await fs.link(src, dest); } catch (e) {
+    if (e.code === 'EEXIST') throw new StoreError(409, `${path.basename(dest)} already exists`);
+    throw e;
+  }
+}
+
+/** Move several src->dest pairs all-or-nothing: link every dest first, then unlink the sources. */
+export async function moveAll(pairs) {
+  const done = [];
+  try {
+    for (const [src, dest] of pairs) { await linkExclusive(src, dest); done.push(dest); }
+  } catch (e) {
+    for (const dest of done) await fs.unlink(dest).catch(() => {});
+    throw e;
+  }
+  for (const [src] of pairs) await fs.unlink(src);
+}
+
 export function createStore(rootDir) {
   const root = path.resolve(rootDir);
 
@@ -30,26 +50,6 @@ export function createStore(rootDir) {
   const pngOf = (p) => p.slice(0, -EXT.length) + '.png';
 
   const isFile = (p) => fs.lstat(p).then((st) => st.isFile(), () => false);
-
-  /** Link src to dest; never overwrites (link fails if dest exists). */
-  async function linkExclusive(src, dest) {
-    try { await fs.link(src, dest); } catch (e) {
-      if (e.code === 'EEXIST') throw new StoreError(409, `${path.basename(dest)} already exists`);
-      throw e;
-    }
-  }
-
-  /** Move several src->dest pairs all-or-nothing: link every dest first, then unlink the sources. */
-  async function moveAll(pairs) {
-    const done = [];
-    try {
-      for (const [src, dest] of pairs) { await linkExclusive(src, dest); done.push(dest); }
-    } catch (e) {
-      for (const dest of done) await fs.unlink(dest).catch(() => {});
-      throw e;
-    }
-    for (const [src] of pairs) await fs.unlink(src);
-  }
 
   /** A regular file (not a dir, FIFO or symlink), or 404. */
   async function requireFile(p, label) {

@@ -46,7 +46,7 @@ beforeEach(async () => {
   base = await listen(hub);
   const port = new URL(base).port;
   // Re-create with the Host guard on, as main.js configures it.
-  hub.close();
+  await new Promise((r) => hub.close(r));
   hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
   await new Promise((r) => hub.listen(Number(port), '127.0.0.1', r));
 });
@@ -177,4 +177,19 @@ test('save into a project name too long for a version suffix is a clear 400', as
   const res = await post('/api/save', { project: 'p'.repeat(111) });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /too long/);
+});
+
+test('version overflow is a clear 400, not a retry loop', async () => {
+  await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v999999999.excalidraw'), JSON.stringify({ elements: [] }));
+  const res = await post('/api/save', { project: 'budgeting' });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /highest version/);
+});
+
+test('deleting the loaded drawing keeps its appState for the next save', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  await post('/api/delete', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const save = await (await post('/api/save', { project: 'budgeting' })).json();
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', save.current.file), 'utf8'));
+  assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' });
 });
