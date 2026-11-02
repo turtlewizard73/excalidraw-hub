@@ -1,0 +1,131 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hub-fixture",
+  "elements": [
+    {
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 11,
+      "version": 3,
+      "versionNonce": 7,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1700000000000,
+      "link": null,
+      "locked": false,
+      "id": "img-1",
+      "type": "image",
+      "x": 100,
+      "y": 100,
+      "width": 160,
+      "height": 120,
+      "index": "a0",
+      "status": "saved",
+      "fileId": "fixture-red-png-1",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#ffec99",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 12,
+      "version": 3,
+      "versionNonce": 7,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1700000000000,
+      "link": null,
+      "locked": false,
+      "id": "rect-sharp",
+      "type": "rectangle",
+      "x": 300,
+      "y": 100,
+      "width": 120,
+      "height": 80,
+      "index": "a1"
+    },
+    {
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 13,
+      "version": 3,
+      "versionNonce": 7,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1700000000000,
+      "link": null,
+      "locked": false,
+      "id": "free-1",
+      "type": "freedraw",
+      "x": 500,
+      "y": 120,
+      "width": 60,
+      "height": 40,
+      "index": "a2",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          30
+        ],
+        [
+          40,
+          10
+        ],
+        [
+          60,
+          40
+        ]
+      ],
+      "pressures": [],
+      "simulatePressure": true,
+      "lastCommittedPoint": null
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#fff9db",
+    "gridSize": 20
+  },
+  "files": {
+    "fixture-red-png-1": {
+      "id": "fixture-red-png-1",
+      "mimeType": "image/png",
+      "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR4nO3NMQ0AAAgDsMmZfz2IQQYcTfo3056IWCwWi8VisVgsFov/xgu6J36M1viz4gAAAABJRU5ErkJggg==",
+      "created": 1700000000000
+    }
+  }
+}

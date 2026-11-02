@@ -1,0 +1,4 @@
+probe/out/
+node_modules/
+.env
+test-results/
