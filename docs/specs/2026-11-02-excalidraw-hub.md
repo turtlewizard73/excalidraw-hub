@@ -42,6 +42,7 @@ Changed 2026-11-05 at the user's request. The first version always wrote a new v
 - Only the loaded drawing can be overwritten, so a mistyped label or project name cannot destroy another file. Overwrites replace the file atomically (temp file, then rename). Based on: an overwrite is the one way a save can lose data.
 - **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
 - **Known limit:** overwriting leaves a same-named `.png` stale.
+- The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before this change shows "Save new version" and sends no flag; defaulting to off would make that click overwrite.
 - The checkbox is not remembered between page loads. Based on: "default off".
 - Saving into a new project name creates the folder.
 

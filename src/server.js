@@ -58,12 +58,13 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       return { current: baseline.current, elementCount: doc.elements.filter((e) => !e.isDeleted).length };
     }),
 
-    'POST /api/save': serial(async ({ project, label, versioned = false }) => {
+    'POST /api/save': serial(async ({ project, label, versioned }) => {
       if (!isSafeName(project)) throw new HttpError(400, `invalid project name: ${JSON.stringify(project)}`);
       // Leave room for `_v<up to 9 digits>` within the name limit.
       if (project.length > MAX_NAME - 11) throw new HttpError(400, `project name too long to save into (max ${MAX_NAME - 11} characters)`);
       if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
-      if (typeof versioned !== 'boolean') throw new HttpError(400, 'versioned must be a boolean');
+      // Required: a page loaded before this flag existed says "Save new version" and must not overwrite.
+      if (typeof versioned !== 'boolean') throw new HttpError(400, 'this page is out of date; reload it and save again');
       const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
       if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');
       const doc = buildDocument(elements, files, baseline.appState);
