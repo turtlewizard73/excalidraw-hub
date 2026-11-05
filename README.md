@@ -25,7 +25,7 @@ Open http://localhost:3080. Stop it with `docker compose down`. Details and over
 
 ## Use
 - **Load:** click a drawing in the sidebar. It replaces what is on the shared canvas, and asks first if the canvas has unsaved changes.
-- **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses to overwrite another file. A new project name creates the folder.
+- **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder.
 - **Versioned checkbox:** off by default. Tick it and the button becomes "Save new version", which writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
 - **Rename / delete:** hover a drawing and use ✎ or 🗑. The `.png` with the same name moves or goes with it. Delete asks first.
 - **Unsaved badge:** "● Unsaved changes" after a real edit, "Saved" after a load or save. Leaving the page with unsaved changes shows the browser's warning.

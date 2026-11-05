@@ -38,10 +38,15 @@ Changed 2026-11-05 at the user's request. The first version always wrote a new v
 - **Checkbox on ("Versioned"):** writes `<project>_v<n>[_<label>].excalidraw`, where `n` is the highest `v<i>` in the folder plus one, or `0` when no file follows the scheme. It never overwrites.
 - **Checkbox off (default):**
   - No label and a drawing from this project is loaded: overwrites that drawing, like Save in an editor.
-  - Otherwise: writes `<project>[_<label>].excalidraw`, and refuses (409) if that file exists and is not the loaded drawing.
-- Only the loaded drawing can be overwritten, so a mistyped label or project name cannot destroy another file. Overwrites replace the file atomically (temp file, then rename). Based on: an overwrite is the one way a save can lose data.
+  - Otherwise: writes `<project>[_<label>].excalidraw`, and refuses (409) if that file exists. A label never overwrites, not even the loaded drawing. A label with no `a-z`/`0-9` is refused (400) rather than treated as no label.
+- Only the loaded drawing can be overwritten, so a mistyped label or project name cannot destroy another file. Overwrites replace the file atomically (synced temp file, then rename). Based on: an overwrite is the one way a save can lose data.
+- **An overwrite is refused (409) when something looks wrong.** The Versioned path still saves in these cases. Based on: independent review, 2026-11-05.
+  - The canvas is empty but the drawing was not. The canvas is in-memory, so a restart would otherwise wipe the file.
+  - A live image element's file is missing from the canvas.
+  - The file changed on disk since load or save (mtime + size), e.g. `git pull` or an agent's export.
+- A load forgets the baseline before touching the canvas. If it fails or times out, the canvas may hold anything, so the next save must not treat it as the old drawing.
 - **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
-- **Known limit:** overwriting leaves a same-named `.png` stale.
+- **Known limits:** overwriting leaves a same-named `.png` stale and resets the file's mode to the default. A second tab showing an older drawing can overwrite the drawing loaded from the first tab until its 2 s poll catches up (accepted: narrow window, and the status poll shows the current file).
 - The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before this change shows "Save new version" and sends no flag; defaulting to off would make that click overwrite.
 - The checkbox is not remembered between page loads. Based on: "default off".
 - Saving into a new project name creates the folder.

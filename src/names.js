@@ -34,10 +34,14 @@ export function saveName(project, version, label) {
   return withLabel(`${project}_v${version}`, label);
 }
 
-/** Target of a save with versioning off: the loaded drawing, unless a label names another file. */
-export function plainSaveName(project, label, current) {
-  const name = withLabel(project, label);
-  return name === `${project}${EXT}` && current?.project === project ? current.file : name;
+/** A blank label, or one with something a file name can use (the slug keeps only a-z and 0-9). */
+export const isUsableLabel = (label) => !String(label ?? '').trim() || /[A-Za-z0-9]/.test(String(label));
+
+/** Target of a save with versioning off. Only "no label, drawing from this project loaded" overwrites. */
+export function plainSaveTarget(project, label, current) {
+  const file = withLabel(project, label);
+  if (file === `${project}${EXT}` && current?.project === project) return { file: current.file, overwrite: true };
+  return { file, overwrite: false };
 }
 
 /** Versioned drawings first (highest first, the highest marked latest), then off-scheme files by name. */

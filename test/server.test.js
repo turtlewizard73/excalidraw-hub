@@ -1,4 +1,4 @@
-import { test, beforeEach, afterEach } from 'node:test';
+import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -20,6 +20,7 @@ function fakeCanvas() {
     if (req.url === '/api/files' && req.method === 'GET') return send({ files: Object.fromEntries(state.files) });
     if (req.url === '/api/files' && req.method === 'POST') { for (const f of json.files) state.files.set(f.id, f); return send({ success: true }); }
     if (req.url === '/api/elements/batch') {
+      if (state.failBatch) { res.writeHead(400, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, error: 'rejected' })); }
       if (json.replace) state.elements.clear();
       for (const e of json.elements) state.elements.set(e.id, { ...e, createdAt: 'c', updatedAt: 'u', version: 1 });
       return send({ success: true });
@@ -224,7 +225,7 @@ test('versioning off: a label or nothing loaded writes a plain name and never ov
   const labelled = await (await post('/api/save', { project: 'budgeting', label: 'Second Idea', versioned: false })).json();
   assert.equal(labelled.current.file, 'budgeting_second_idea.excalidraw');
   const again = await post('/api/save', { project: 'budgeting', label: 'second idea', versioned: false });
-  assert.equal(again.status, 200, 'the label names the loaded drawing: in-place save');
+  assert.equal(again.status, 409, 'a label never overwrites, even the loaded drawing');
 });
 
 test('a save without the flag (a tab from before the checkbox) writes nothing and asks to reload', async () => {
@@ -238,4 +239,78 @@ test('a save without the flag (a tab from before the checkbox) writes nothing an
   }
   assert.equal(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), 'utf8'), before);
   assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png']);
+});
+
+describe('guards on overwriting the loaded drawing', () => {
+  const file = 'budgeting_v0_plan.excalidraw';
+  const p = () => path.join(dir, 'budgeting', file);
+  const saveInPlace = () => post('/api/save', { project: 'budgeting', versioned: false });
+  beforeEach(async () => { await post('/api/load', { project: 'budgeting', file }); });
+
+  async function refused(pattern) {
+    const before = await fs.readFile(p(), 'utf8');
+    const res = await saveInPlace();
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, pattern);
+    assert.equal(await fs.readFile(p(), 'utf8'), before, 'file untouched');
+    assert.deepEqual((await get('/api/status')).current, { project: 'budgeting', file }, 'still loaded');
+  }
+
+  test('a canvas that restarted empty does not wipe the file; versioned still saves', async () => {
+    canvas.state.elements.clear();
+    await refused(/canvas is empty/);
+    assert.equal((await post('/api/save', { project: 'budgeting', versioned: true })).status, 200);
+  });
+
+  test('a canvas that lost an image does not overwrite', async () => {
+    canvas.state.elements.set('i', { id: 'i', type: 'image', fileId: 'gone', x: 0, y: 0 });
+    await refused(/lost 1 image/);
+  });
+
+  test('a file changed on disk since load is not clobbered', async () => {
+    await fs.writeFile(p(), JSON.stringify({ elements: [rect('from-git')] }));
+    await refused(/changed on disk/);
+  });
+
+  test('repeat saves, and save after rename, keep working in place', async () => {
+    canvas.state.elements.set('c', rect('c', 50));
+    assert.equal((await saveInPlace()).status, 200);
+    canvas.state.elements.set('d', rect('d', 60));
+    assert.equal((await saveInPlace()).status, 200);
+    await post('/api/rename', { project: 'budgeting', file, newBase: 'budgeting_v0_first' });
+    canvas.state.elements.set('e', rect('e', 70));
+    const save = await (await saveInPlace()).json();
+    assert.equal(save.current.file, 'budgeting_v0_first.excalidraw');
+    const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', save.current.file), 'utf8'));
+    assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_first.excalidraw', 'budgeting_v0_first.png']);
+  });
+
+  test('after a failed load, save cannot overwrite the previous drawing', async () => {
+    await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
+    const before = await fs.readFile(p(), 'utf8');
+    canvas.state.failBatch = true;
+    assert.equal((await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' })).status, 502);
+    canvas.state.failBatch = false;
+    const s = await get('/api/status');
+    assert.equal(s.current, null);
+    assert.equal(s.dirty, true);
+    const save = await (await saveInPlace()).json();
+    assert.equal(save.current.file, 'budgeting.excalidraw');
+    assert.equal(await fs.readFile(p(), 'utf8'), before);
+  });
+
+  test('a label with nothing usable is refused, not treated as no label', async () => {
+    const before = await fs.readFile(p(), 'utf8');
+    const res = await post('/api/save', { project: 'budgeting', label: '日本語', versioned: false });
+    assert.equal(res.status, 400);
+    assert.equal(await fs.readFile(p(), 'utf8'), before);
+  });
+
+  test('saving into another project does not touch the loaded drawing', async () => {
+    const before = await fs.readFile(p(), 'utf8');
+    const save = await (await post('/api/save', { project: 'elsewhere', versioned: false })).json();
+    assert.deepEqual(save.current, { project: 'elsewhere', file: 'elsewhere.excalidraw' });
+    assert.equal(await fs.readFile(p(), 'utf8'), before);
+  });
 });

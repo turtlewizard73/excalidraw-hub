@@ -35,3 +35,6 @@ Done 2026-11-03. All six features work against the running containers: 37 unit/A
 **Open**
 - Background and grid changes made in the canvas are not saved: the canvas has no appState API.
 - The canvas on `:3000` has no CSRF or Host guard of its own (upstream).
+
+## Outcome addendum, 2026-11-05: Versioned checkbox
+The user asked for a top-bar checkbox, off by default, that turns versioning on. This reverses the "always a new version" decision; the spec section "Save: versioning is an opt-in checkbox" holds the rules. An advisor check found that a tab from before the change would overwrite through its old "Save new version" button, so the API requires the flag. An independent review found four data-loss paths in the overwrite (empty or image-less canvas after a restart, failed load, symbols-only label, file changed on disk), all fixed with tests. Not built: preserving file mode on overwrite, and a guard against a second tab during its 2 s poll window.

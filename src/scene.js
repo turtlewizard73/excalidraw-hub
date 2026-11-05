@@ -55,7 +55,10 @@ const browserSynced = (elements) => elements.length > 0 && elements.every((e) =>
  */
 export class Baseline {
   constructor() { this.reset(); }
-  reset() { this.current = null; this.elements = null; this.anchor = null; this.appState = { ...DEFAULT_APP_STATE }; }
+  reset() { this.forget(); this.appState = { ...DEFAULT_APP_STATE }; }
+
+  /** The canvas no longer matches a known file (deleted, or a load in progress). Its work counts as unsaved. */
+  forget() { this.current = null; this.elements = null; this.anchor = null; this.stamp = null; }
 
   /** After loading or saving `doc`; `canvasElements` is the canvas state at that moment, if known. */
   set(current, elements, appState, canvasElements = null) {
@@ -77,6 +80,11 @@ export class Baseline {
 
 /** Agent-format elements the canvas stores until a browser tab re-syncs them. */
 export const hasShorthand = (elements) => elements.some((e) => 'label' in e || 'start' in e || 'end' in e);
+
+/** File ids that live image elements use but the canvas no longer holds. */
+export function missingFiles(elements, files) {
+  return live(elements).filter((e) => e.type === 'image' && e.fileId && !files?.[e.fileId]).map((e) => e.fileId);
+}
 
 /** The .excalidraw document for the current canvas state. */
 export function buildDocument(elements, files, appState) {

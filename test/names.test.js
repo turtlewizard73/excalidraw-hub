@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSafeName, parseDrawing, nextVersion, plainSaveName, saveName, sortDrawings } from '../src/names.js';
+import { isSafeName, isUsableLabel, parseDrawing, nextVersion, plainSaveTarget, saveName, sortDrawings } from '../src/names.js';
 
 test('isSafeName accepts plain names and rejects traversal or odd characters', () => {
   for (const ok of ['ai-map', 'f1-title-2026', 'budgeting_v1_plan', 'a.b']) assert.equal(isSafeName(ok), true, ok);
@@ -43,12 +43,17 @@ test('huge version numbers are not versions; long names still fit', () => {
   assert.equal(isSafeName(name.slice(0, -'.excalidraw'.length)), true, name);
 });
 
-test('plainSaveName targets the loaded drawing unless a label names another file', () => {
+test('plainSaveTarget overwrites only with no label and a drawing from this project loaded', () => {
   const current = { project: 'f1', file: 'board-with-f1.excalidraw' };
-  assert.equal(plainSaveName('f1', '', current), 'board-with-f1.excalidraw');
-  assert.equal(plainSaveName('f1', ' !!! ', current), 'board-with-f1.excalidraw', 'label with nothing usable');
-  assert.equal(plainSaveName('f1', 'New Idea', current), 'f1_new_idea.excalidraw');
-  assert.equal(plainSaveName('other', '', current), 'other.excalidraw', 'different project');
-  assert.equal(plainSaveName('f1', undefined, null), 'f1.excalidraw');
-  assert.equal(isSafeName(plainSaveName('p'.repeat(110), 'a long label that will not fit in the name limit at all, really', null).slice(0, -'.excalidraw'.length)), true);
+  assert.deepEqual(plainSaveTarget('f1', '', current), { file: 'board-with-f1.excalidraw', overwrite: true });
+  assert.deepEqual(plainSaveTarget('f1', 'New Idea', current), { file: 'f1_new_idea.excalidraw', overwrite: false });
+  assert.deepEqual(plainSaveTarget('other', '', current), { file: 'other.excalidraw', overwrite: false }, 'different project');
+  assert.deepEqual(plainSaveTarget('f1', undefined, null), { file: 'f1.excalidraw', overwrite: false });
+  assert.deepEqual(plainSaveTarget('f1', 'x', { project: 'f1', file: 'f1_x.excalidraw' }), { file: 'f1_x.excalidraw', overwrite: false }, 'a label never overwrites');
+  assert.equal(isSafeName(plainSaveTarget('p'.repeat(110), 'a long label that will not fit in the name limit at all, really', null).file.slice(0, -'.excalidraw'.length)), true);
+});
+
+test('isUsableLabel: blank or containing a-z/0-9', () => {
+  for (const ok of [undefined, '', '   ', 'x', 'v2 draft!']) assert.equal(isUsableLabel(ok), true, String(ok));
+  for (const bad of ['!!!', '日本語', ' - ']) assert.equal(isUsableLabel(bad), false, bad);
 });

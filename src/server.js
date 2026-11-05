@@ -3,8 +3,8 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXT, MAX_NAME, isSafeName, nextVersion, plainSaveName, saveName } from './names.js';
-import { Baseline, buildDocument, hasShorthand } from './scene.js';
+import { EXT, MAX_NAME, isSafeName, isUsableLabel, nextVersion, plainSaveTarget, saveName } from './names.js';
+import { Baseline, buildDocument, hasShorthand, missingFiles } from './scene.js';
 import { StoreError } from './store.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -51,10 +51,14 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     },
 
     'POST /api/load': serial(async ({ project, file, force }) => {
+      const stamp = await store.stamp(project, file); // before reading: a change in between then counts as a change
       const doc = await store.read(project, file);
       if (!force && baseline.isDirty(await canvas.elements())) throw new HttpError(409, 'the canvas has unsaved changes', { dirty: true });
+      // If the load fails, the canvas may hold anything: forget the old drawing so no save can overwrite it.
+      baseline.forget();
       await canvas.load(doc);
       baseline.set({ project, file }, doc.elements, doc.appState);
+      baseline.stamp = stamp;
       return { current: baseline.current, elementCount: doc.elements.filter((e) => !e.isDeleted).length };
     }),
 
@@ -68,13 +72,22 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
       if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');
       const doc = buildDocument(elements, files, baseline.appState);
-      const saved = (file) => {
+      const saved = async (file) => {
         baseline.set({ project, file }, doc.elements, doc.appState, elements);
+        baseline.stamp = await store.stamp(project, file);
         return { current: baseline.current, elementCount: doc.elements.length };
       };
       if (!versioned) {
-        const file = plainSaveName(project, label, baseline.current);
-        if (same(baseline.current, { project, file })) {
+        if (!isUsableLabel(label)) throw new HttpError(400, 'the label needs a letter or digit (a-z, 0-9) to use in the file name');
+        const { file, overwrite } = plainSaveTarget(project, label, baseline.current);
+        if (overwrite) {
+          // Overwriting is the one way a save can lose data: refuse whenever the canvas or the file looks wrong.
+          const refuse = (why) => new HttpError(409, `${file} not overwritten: ${why}. Tick Versioned to save a copy.`);
+          if (!doc.elements.length && baseline.elements?.some((e) => !e.isDeleted)) throw refuse('the canvas is empty (did it restart?)');
+          const missing = missingFiles(elements, files);
+          if (missing.length) throw refuse(`the canvas lost ${missing.length} image(s)`);
+          const stamp = await store.stamp(project, file);
+          if (stamp !== null && stamp !== baseline.stamp) throw refuse('the file changed on disk since it was loaded');
           await store.overwrite(project, file, doc);
           return saved(file);
         }
@@ -92,7 +105,7 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
         const file = saveName(project, version, label);
         try {
           await store.create(project, file, doc);
-          return saved(file);
+          return await saved(file);
         } catch (e) {
           if (!(e instanceof StoreError && e.status === 409) || attempt >= 2) throw e;
         }
@@ -110,7 +123,7 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     // Deleting the loaded drawing forgets the baseline: the canvas content now exists nowhere on disk, so it is unsaved.
     'POST /api/delete': serial(async ({ project, file }) => {
       await store.remove(project, file);
-      if (same(baseline.current, { project, file })) { const { appState } = baseline; baseline.reset(); baseline.appState = appState; }
+      if (same(baseline.current, { project, file })) baseline.forget(); // keeps appState for the next save
       return { deleted: { project, file }, current: baseline.current };
     }),
   };
