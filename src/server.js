@@ -3,7 +3,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXT, MAX_NAME, isSafeName, nextVersion, saveName } from './names.js';
+import { EXT, MAX_NAME, isSafeName, nextVersion, plainSaveName, saveName } from './names.js';
 import { Baseline, buildDocument, hasShorthand } from './scene.js';
 import { StoreError } from './store.js';
 
@@ -58,22 +58,40 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       return { current: baseline.current, elementCount: doc.elements.filter((e) => !e.isDeleted).length };
     }),
 
-    'POST /api/save': serial(async ({ project, label }) => {
+    'POST /api/save': serial(async ({ project, label, versioned = false }) => {
       if (!isSafeName(project)) throw new HttpError(400, `invalid project name: ${JSON.stringify(project)}`);
       // Leave room for `_v<up to 9 digits>` within the name limit.
       if (project.length > MAX_NAME - 11) throw new HttpError(400, `project name too long to save into (max ${MAX_NAME - 11} characters)`);
       if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
+      if (typeof versioned !== 'boolean') throw new HttpError(400, 'versioned must be a boolean');
       const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
       if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');
       const doc = buildDocument(elements, files, baseline.appState);
+      const saved = (file) => {
+        baseline.set({ project, file }, doc.elements, doc.appState, elements);
+        return { current: baseline.current, elementCount: doc.elements.length };
+      };
+      if (!versioned) {
+        const file = plainSaveName(project, label, baseline.current);
+        if (same(baseline.current, { project, file })) {
+          await store.overwrite(project, file, doc);
+          return saved(file);
+        }
+        try {
+          await store.create(project, file, doc);
+        } catch (e) {
+          if (e instanceof StoreError && e.status === 409) throw new HttpError(409, `${file} already exists; change the label or tick Versioned`);
+          throw e;
+        }
+        return saved(file);
+      }
       for (let attempt = 0; ; attempt++) {
         const version = nextVersion(project, await store.files(project));
         if (version > 999999999) throw new HttpError(400, `${project} has reached the highest version number (v999999999)`);
         const file = saveName(project, version, label);
         try {
           await store.create(project, file, doc);
-          baseline.set({ project, file }, doc.elements, doc.appState, elements);
-          return { current: baseline.current, elementCount: doc.elements.length };
+          return saved(file);
         } catch (e) {
           if (!(e instanceof StoreError && e.status === 409) || attempt >= 2) throw e;
         }

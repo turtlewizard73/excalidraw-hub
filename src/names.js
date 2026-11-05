@@ -23,11 +23,21 @@ export function nextVersion(project, files) {
   return versions.length ? Math.max(...versions) + 1 : 0;
 }
 
-export function saveName(project, version, label) {
-  const stem = `${project}_v${version}`;
+/** `<stem>[_<slug of label>].excalidraw`, with the slug cut to fit the name limit. */
+function withLabel(stem, label) {
   const room = Math.min(60, MAX_NAME - stem.length - 1);
   const slug = room > 0 ? String(label ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, room).replace(/_+$/, '') : '';
   return `${stem}${slug ? `_${slug}` : ''}${EXT}`;
+}
+
+export function saveName(project, version, label) {
+  return withLabel(`${project}_v${version}`, label);
+}
+
+/** Target of a save with versioning off: the loaded drawing, unless a label names another file. */
+export function plainSaveName(project, label, current) {
+  const name = withLabel(project, label);
+  return name === `${project}${EXT}` && current?.project === project ? current.file : name;
 }
 
 /** Versioned drawings first (highest first, the highest marked latest), then off-scheme files by name. */

@@ -108,3 +108,17 @@ test('moveAll rolls back earlier links when a later one fails', async () => {
   assert.deepEqual(await ls('budgeting'), ['a.png', 'budgeting_v0_plan.excalidraw', 'budgeting_v1_plan_with_proposal.excalidraw', 'taken.png']);
   assert.equal(await fs.readFile(p('taken.png'), 'utf8'), 'keep');
 });
+
+test('overwrite replaces a file atomically, creates a missing one, and refuses non-files', async () => {
+  await store.overwrite('budgeting', 'budgeting_v0_plan.excalidraw', { elements: [9] });
+  assert.deepEqual(await store.read('budgeting', 'budgeting_v0_plan.excalidraw'), { elements: [9] });
+  await store.overwrite('budgeting', 'gone.excalidraw', { elements: [] });
+  assert.deepEqual(await ls('budgeting'), ['budgeting_v0_plan.excalidraw', 'budgeting_v1_plan_with_proposal.excalidraw', 'gone.excalidraw'], 'no temp files left');
+  await fs.mkdir(path.join(dir, 'budgeting', 'dir.excalidraw'));
+  await assert.rejects(store.overwrite('budgeting', 'dir.excalidraw', { elements: [] }), status(409));
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-outside-'));
+  await fs.writeFile(path.join(outside, 's.excalidraw'), 'keep');
+  await fs.symlink(path.join(outside, 's.excalidraw'), path.join(dir, 'budgeting', 'link.excalidraw'));
+  await assert.rejects(store.overwrite('budgeting', 'link.excalidraw', { elements: [] }), status(400));
+  assert.equal(await fs.readFile(path.join(outside, 's.excalidraw'), 'utf8'), 'keep');
+});

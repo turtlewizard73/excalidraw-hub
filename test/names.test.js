@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSafeName, parseDrawing, nextVersion, saveName, sortDrawings } from '../src/names.js';
+import { isSafeName, parseDrawing, nextVersion, plainSaveName, saveName, sortDrawings } from '../src/names.js';
 
 test('isSafeName accepts plain names and rejects traversal or odd characters', () => {
   for (const ok of ['ai-map', 'f1-title-2026', 'budgeting_v1_plan', 'a.b']) assert.equal(isSafeName(ok), true, ok);
@@ -41,4 +41,14 @@ test('huge version numbers are not versions; long names still fit', () => {
   const project = 'p'.repeat(110);
   const name = saveName(project, 12, 'a long label that will not fit');
   assert.equal(isSafeName(name.slice(0, -'.excalidraw'.length)), true, name);
+});
+
+test('plainSaveName targets the loaded drawing unless a label names another file', () => {
+  const current = { project: 'f1', file: 'board-with-f1.excalidraw' };
+  assert.equal(plainSaveName('f1', '', current), 'board-with-f1.excalidraw');
+  assert.equal(plainSaveName('f1', ' !!! ', current), 'board-with-f1.excalidraw', 'label with nothing usable');
+  assert.equal(plainSaveName('f1', 'New Idea', current), 'f1_new_idea.excalidraw');
+  assert.equal(plainSaveName('other', '', current), 'other.excalidraw', 'different project');
+  assert.equal(plainSaveName('f1', undefined, null), 'f1.excalidraw');
+  assert.equal(isSafeName(plainSaveName('p'.repeat(110), 'a long label that will not fit in the name limit at all, really', null).slice(0, -'.excalidraw'.length)), true);
 });

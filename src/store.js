@@ -95,6 +95,16 @@ export function createStore(rootDir) {
       try { await moveAll([[tmp, p]]); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
     },
 
+    /** Replace `file` atomically, or create it if missing. Only for the drawing the user has loaded. */
+    async overwrite(project, file, doc) {
+      const p = await resolve(project, file);
+      if (await exists(p) && !(await isFile(p))) throw new StoreError(409, `${project}/${file} is not a regular file`);
+      await fs.mkdir(path.dirname(p), { recursive: true });
+      const tmp = path.join(path.dirname(p), `.${file}.${crypto.randomUUID()}.tmp`);
+      await fs.writeFile(tmp, JSON.stringify(doc, null, 2) + '\n', { flag: 'wx' });
+      try { await fs.rename(tmp, p); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
+    },
+
     /** Rename within the project; the same-named .png moves along. */
     async rename(project, file, newFile) {
       const src = await resolve(project, file);

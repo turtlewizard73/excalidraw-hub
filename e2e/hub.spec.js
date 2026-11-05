@@ -31,6 +31,11 @@ async function drawRectangle() {
   await frame.locator('[data-testid="toolbar-selection"]').click({ force: true });
 }
 
+test('versioning checkbox is off by default', async () => {
+  await expect(page.getByTestId('save-versioned')).not.toBeChecked();
+  await expect(page.getByTestId('save')).toHaveText('Save');
+});
+
 test('list: projects and versions, latest marked, off-scheme files listed plainly', async () => {
   await expect(page.locator('details[data-project]')).toHaveCount(5);
   const names = await page.locator('details[data-project]').evaluateAll((els) => els.map((e) => e.dataset.project));
@@ -81,6 +86,8 @@ test('unsaved: leaving the page warns', async () => {
 });
 
 test('save: writes the next version with the edit and becomes clean', async () => {
+  await page.getByTestId('save-versioned').check();
+  await expect(page.getByTestId('save')).toHaveText('Save new version');
   const before = readDoc('budgeting/budgeting_v1_plan_with_proposal.excalidraw').elements.length;
   await page.getByTestId('save-project').fill('budgeting');
   await page.getByTestId('save-label').fill('E2E edit');
@@ -99,6 +106,7 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   await expect(page.getByTestId('current')).toHaveText('image-test / image-test_v0_red_png.excalidraw');
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
+  await page.getByTestId('save-versioned').check();
   await page.getByTestId('save').click();
   await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw');
   const orig = readDoc('image-test/image-test_v0_red_png.excalidraw');
@@ -108,6 +116,26 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   expect(saved.elements.map((e) => e.type).sort()).toEqual(['freedraw', 'image', 'rectangle', 'rectangle']);
   const fd = saved.elements.find((e) => e.type === 'freedraw');
   expect(fd.points).toEqual(orig.elements.find((e) => e.type === 'freedraw').points);
+});
+
+test('save with versioning off: overwrites the loaded drawing, adds no file, refuses to overwrite another', async () => {
+  await page.getByTestId('save-versioned').uncheck();
+  await expect(page.getByTestId('save')).toHaveText('Save');
+  const file = 'image-test/image-test_v1.excalidraw';
+  const before = readDoc(file).elements.length;
+  const listed = fs.readdirSync(path.join(DATA, 'image-test')).sort();
+  await drawRectangle();
+  await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw');
+  await expect(page.getByTestId('dirty')).toHaveText('Saved');
+  expect(readDoc(file).elements.length).toBe(before + 1);
+  expect(fs.readdirSync(path.join(DATA, 'image-test')).sort()).toEqual(listed);
+  await page.getByTestId('save-label').fill('v0 red png');
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('message')).toContainText('already exists');
+  expect(readDoc('image-test/image-test_v0_red_png.excalidraw').elements.length).toBe(3);
+  await page.getByTestId('save-label').fill('');
 });
 
 test('rename: moves the file, keeps the current drawing in sync', async () => {

@@ -18,7 +18,8 @@
         <input id="save-project" data-testid="save-project" list="project-names" placeholder="project" required>
         <datalist id="project-names"></datalist>
         <input id="save-label" data-testid="save-label" placeholder="label (optional)">
-        <button type="submit" data-testid="save">Save new version</button>
+        <label id="versioned" title="Save as the next version (_v1, _v2, ...) instead of saving over the loaded drawing"><input type="checkbox" id="save-versioned" data-testid="save-versioned"> Versioned</label>
+        <button type="submit" id="save-button" data-testid="save">Save</button>
       </form>
       <span id="message" data-testid="message" role="status"></span>
     </header>

@@ -33,9 +33,16 @@ Each decision states what it is based on.
 - The canvas stores no appState. The hub remembers the loaded file's `appState` and writes it back on save (default `{viewBackgroundColor: "#ffffff", gridSize: null}`, as the MCP export writes).
 - **Known limits:** background or grid changes made in the canvas are not saved, and a loaded background colour is not shown. Based on: canvas source (`dist/server.js`, no appState route).
 
-### Save always writes a new version
-- Save writes `<project>_v<n>[_<label>].excalidraw`, where `n` is the highest `v<i>` in the folder plus one, or `0` when no file follows the scheme. The file is created exclusively (`wx`) after writing a temp file, so a save never overwrites.
-- **Not building "overwrite".** Based on: parent repo's Drawings rule ("each meaningful new state gets the next `v<i>`"); git already keeps history; rename covers fixing a label. One code path is simpler to test.
+### Save: versioning is an opt-in checkbox
+Changed 2026-11-05 at the user's request. The first version always wrote a new version and offered no overwrite. Based on: the user asked for a top-bar checkbox, off by default, that adds versioning.
+- **Checkbox on ("Versioned"):** writes `<project>_v<n>[_<label>].excalidraw`, where `n` is the highest `v<i>` in the folder plus one, or `0` when no file follows the scheme. It never overwrites.
+- **Checkbox off (default):**
+  - No label and a drawing from this project is loaded: overwrites that drawing, like Save in an editor.
+  - Otherwise: writes `<project>[_<label>].excalidraw`, and refuses (409) if that file exists and is not the loaded drawing.
+- Only the loaded drawing can be overwritten, so a mistyped label or project name cannot destroy another file. Overwrites replace the file atomically (temp file, then rename). Based on: an overwrite is the one way a save can lose data.
+- **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
+- **Known limit:** overwriting leaves a same-named `.png` stale.
+- The checkbox is not remembered between page loads. Based on: "default off".
 - Saving into a new project name creates the folder.
 
 ### Listing and naming
@@ -68,7 +75,7 @@ Each decision states what it is based on.
 - The page sends `X-Frame-Options: DENY` and a CSP (`frame-ancestors 'none'`, `frame-src` = the canvas origin only), against clickjacking.
 - Load, save, rename and delete run one at a time (a promise queue), because they share the baseline and the canvas.
 - Rename and save move files all-or-nothing: every destination is hard-linked first (fails if it exists), then the sources are unlinked. A `.png` already at the rename destination is a conflict, even when the source has none.
-- **Accepted risk:** the canvas on `:3000` has no CSRF or Host guard of its own (upstream). A web page could rewrite the shared canvas. The hub cannot fix this. Saving always writes a new version, so nothing on disk is lost.
+- **Accepted risk:** the canvas on `:3000` has no CSRF or Host guard of its own (upstream). A web page could rewrite the shared canvas. The hub cannot fix this. With versioning off, a save after such a rewrite would overwrite the loaded file; git keeps committed states.
 - Container runs as the host user (`UID`/`GID` from `.env`, default 1000) so files in the repo aren't root-owned.
 
 ### Docker and networking
@@ -77,7 +84,7 @@ Each decision states what it is based on.
 - `compose.test.yaml`: its own canvas, a hub over a fixture copy and a Playwright runner (image and npm package both `1.56.1`), talking over the compose network by service name. Tests never touch port 3000 or the real drawings.
 
 ## Out of scope
-- Overwrite-save, a new-project button separate from save, moving drawings between projects.
+- A new-project button separate from save, moving drawings between projects.
 - Syncing appState from the canvas, multi-user locking, auth.
 - Cleaning stale image files out of the canvas memory.
 - Element types the canvas rejects (`embeddable`, `iframe`, `magicframe`): load reports the canvas error.

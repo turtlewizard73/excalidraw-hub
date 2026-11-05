@@ -64,7 +64,7 @@ test('list → load → clean → edit → dirty → save new version → clean'
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
 
-  const save = await (await post('/api/save', { project: 'budgeting', label: 'With C' })).json();
+  const save = await (await post('/api/save', { project: 'budgeting', label: 'With C', versioned: true })).json();
   assert.deepEqual(save.current, { project: 'budgeting', file: 'budgeting_v1_with_c.excalidraw' });
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v1_with_c.excalidraw'), 'utf8'));
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
@@ -89,7 +89,7 @@ test('save refuses agent shorthand and keeps files referenced only', async () =>
   canvas.state.elements.clear();
   canvas.state.elements.set('i', { id: 'i', type: 'image', fileId: 'f1', x: 0, y: 0 });
   canvas.state.files.set('f1', { id: 'f1', dataURL: 'data:1' }); canvas.state.files.set('old', { id: 'old', dataURL: 'data:2' });
-  const save = await (await post('/api/save', { project: 'new-proj' })).json();
+  const save = await (await post('/api/save', { project: 'new-proj', versioned: true })).json();
   assert.equal(save.current.file, 'new-proj_v0.excalidraw');
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'new-proj', 'new-proj_v0.excalidraw'), 'utf8'));
   assert.deepEqual(Object.keys(saved.files), ['f1']);
@@ -150,7 +150,7 @@ test('same-origin posts pass, oversized bodies are refused', async () => {
 
 test('concurrent saves get distinct versions', async () => {
   canvas.state.elements.set('a', rect('a'));
-  const results = await Promise.all([1, 2, 3].map(() => post('/api/save', { project: 'budgeting' }).then((r) => r.json())));
+  const results = await Promise.all([1, 2, 3].map(() => post('/api/save', { project: 'budgeting', versioned: true }).then((r) => r.json())));
   assert.deepEqual(results.map((r) => r.current.file).sort(), ['budgeting_v1.excalidraw', 'budgeting_v2.excalidraw', 'budgeting_v3.excalidraw']);
 });
 
@@ -172,7 +172,7 @@ test('the page is not frameable and only frames the canvas', async () => {
 
 test('save into a project name too long for a version suffix is a clear 400', async () => {
   canvas.state.elements.set('a', rect('a'));
-  const ok = await post('/api/save', { project: 'p'.repeat(110), label: 'some label' });
+  const ok = await post('/api/save', { project: 'p'.repeat(110), label: 'some label', versioned: true });
   assert.equal(ok.status, 200);
   const res = await post('/api/save', { project: 'p'.repeat(111) });
   assert.equal(res.status, 400);
@@ -181,7 +181,7 @@ test('save into a project name too long for a version suffix is a clear 400', as
 
 test('version overflow is a clear 400, not a retry loop', async () => {
   await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v999999999.excalidraw'), JSON.stringify({ elements: [] }));
-  const res = await post('/api/save', { project: 'budgeting' });
+  const res = await post('/api/save', { project: 'budgeting', versioned: true });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /highest version/);
 });
@@ -192,4 +192,41 @@ test('deleting the loaded drawing keeps its appState for the next save', async (
   const save = await (await post('/api/save', { project: 'budgeting' })).json();
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', save.current.file), 'utf8'));
   assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' });
+});
+
+test('versioning off: save overwrites the loaded drawing and becomes clean', async () => {
+  const file = 'budgeting_v0_plan.excalidraw';
+  await post('/api/load', { project: 'budgeting', file });
+  canvas.state.elements.set('c', rect('c', 50));
+  assert.equal((await get('/api/status')).dirty, true);
+  const save = await (await post('/api/save', { project: 'budgeting' })).json();
+  assert.deepEqual(save.current, { project: 'budgeting', file });
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', file), 'utf8'));
+  assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
+  assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' });
+  assert.equal((await get('/api/status')).dirty, false);
+  assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), [file, 'budgeting_v0_plan.png'].sort(), 'no new file');
+});
+
+test('versioning off: a label or nothing loaded writes a plain name and never overwrites another file', async () => {
+  const other = path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw');
+  const before = await fs.readFile(other, 'utf8');
+  canvas.state.elements.set('a', rect('a'));
+  const first = await (await post('/api/save', { project: 'budgeting' })).json();
+  assert.equal(first.current.file, 'budgeting.excalidraw', 'nothing loaded');
+
+  const refused = await post('/api/save', { project: 'budgeting', label: 'v0 plan' });
+  assert.equal(refused.status, 409, 'the label names a file that is not the loaded drawing');
+  assert.match((await refused.json()).error, /budgeting_v0_plan\.excalidraw already exists.*Versioned/);
+  assert.equal(await fs.readFile(other, 'utf8'), before, 'other drawing untouched');
+  assert.equal((await get('/api/status')).current.file, 'budgeting.excalidraw', 'current unchanged after refusal');
+
+  const labelled = await (await post('/api/save', { project: 'budgeting', label: 'Second Idea' })).json();
+  assert.equal(labelled.current.file, 'budgeting_second_idea.excalidraw');
+  const again = await post('/api/save', { project: 'budgeting', label: 'second idea' });
+  assert.equal(again.status, 200, 'the label names the loaded drawing: in-place save');
+});
+
+test('versioned must be a boolean', async () => {
+  assert.equal((await post('/api/save', { project: 'budgeting', versioned: 'yes' })).status, 400);
 });

@@ -95,7 +95,7 @@ async function save(ev) {
   ev.preventDefault();
   const project = $('save-project').value.trim();
   try {
-    const res = await api('/api/save', { project, label: $('save-label').value });
+    const res = await api('/api/save', { project, label: $('save-label').value, versioned: $('save-versioned').checked });
     state.current = res.current;
     $('save-label').value = '';
     say(`Saved ${res.current.project}/${res.current.file}`);
@@ -127,6 +127,7 @@ async function remove(project, d) {
 
 window.addEventListener('beforeunload', (ev) => { if (state.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 $('save-form').addEventListener('submit', save);
+$('save-versioned').addEventListener('change', (ev) => { $('save-button').textContent = ev.target.checked ? 'Save new version' : 'Save'; });
 
 const config = await api('/api/config');
 $('canvas').src = config.canvasUrl;
