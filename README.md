@@ -23,6 +23,8 @@ docker compose up -d --build
 
 Open http://localhost:3080. Stop it with `docker compose down`. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md).
 
+The drawings folder must hold at least one entry, such as a project folder. If it is empty, the hub exits and Docker keeps retrying it. That is how it waits out Docker Desktop connecting the folder after a boot.
+
 ## Use
 - **Load:** click a drawing in the sidebar. It replaces what is on the shared canvas. Unsaved changes are saved first, without asking: into the loaded drawing, or as `tmp/tmp_v<n>` when nothing was loaded. If that save is refused, a popup says why and nothing is loaded.
 - **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder. Every save also writes `<name>.png` next to the drawing.

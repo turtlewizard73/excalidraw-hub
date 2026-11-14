@@ -19,6 +19,8 @@ The hub mounts:
 
 The image installs `git` and `openssh-client` (Debian packages, `Dockerfile`).
 
+It starts with Docker (`restart: unless-stopped`). After a boot, Docker Desktop may start it before the drawings folder is connected. The hub then exits with "excalidraw-hub not starting: cannot read drawings folder …" (or "… is empty") and Docker retries it until the folder is there, which usually takes a few seconds. `docker inspect excalidraw-hub-hub-1 --format '{{.RestartCount}}'` shows how often that happened. If the sidebar stays empty, `docker logs excalidraw-hub-hub-1` shows why.
+
 ## Test
 ```bash
 docker build -t excalidraw-hub-unit . && docker run --rm -u 1000:1000 -e HOME=/tmp -v "$PWD:/app:ro" -w /app excalidraw-hub-unit node --test test/

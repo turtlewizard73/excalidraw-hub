@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createBackups } from './backups.js';
 import { createCanvas } from './canvas.js';
 import { createGit, gitRunner } from './git.js';
+import { checkDrawingsDir } from './mounts.js';
 import { createServer } from './server.js';
 import { createStore } from './store.js';
 
@@ -21,6 +22,10 @@ if (repo) {
   if (rel.startsWith('..') || path.isAbsolute(rel)) console.error(`git sync off: ${drawings} is not inside REPO_DIR ${repo}`);
   else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'dev' });
 }
+
+// Exit so the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race").
+const notReady = await checkDrawingsDir(drawings);
+if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting so Docker restarts it`); process.exit(1); }
 
 const server = createServer({
   store: createStore(drawings),
