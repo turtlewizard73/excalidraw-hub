@@ -23,7 +23,7 @@ Input: [handoff](../handoffs/2026-11-14-hub-errors.md). Spec: [2026-11-02-excali
 - `scripts/e2e.sh` (tear down the manual stack first: same compose project name).
 
 ## Outcome
-Done 2026-11-14 on `feat/hub-errors`; not merged and not deployed to the live hub on :3080 (it still runs the old code until `docker compose up -d --build`).
+Done 2026-11-14. Squash-merged to `main` and deployed to the live hub on :3080.
 - **E1 fixed.** Agents save with no tab: `src/agent.js` expands shorthand and skeletal elements, the file is written, then the canvas is updated to match. E2E proves it with zero websocket clients: save 200, status clean, bound labels and bindings in the file, PNG written, and still clean after a tab opens and syncs.
 - **E3 fixed.** A forced load over unsaved work first writes `autosave/<timestamp>_<drawing>.excalidraw` (newest 50 kept). A failed backup aborts the load. The confirm shows the element count; the message names the backup.
 - **E2: not a bug.** The dirty flag was right: the legend had been dragged into frame L2 at 14:21:39. No change.
