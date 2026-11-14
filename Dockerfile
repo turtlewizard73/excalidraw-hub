@@ -1,5 +1,6 @@
-# Hub server: Node 20 built-ins only, nothing to install.
+# Hub server: Node 20 built-ins; git + ssh only for the per-project sync button.
 FROM node:20-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json ./
 COPY src ./src

@@ -1,6 +1,6 @@
-// Hub page: sidebar of projects/drawings, canvas iframe, save/rename/delete, unsaved badge.
+// Hub page: sidebar of projects/drawings, canvas iframe, save/revert/rename/delete/sync, unsaved badge.
 const $ = (id) => document.getElementById(id);
-let state = { projects: [], current: null, dirty: false };
+let state = { projects: [], current: null, dirty: false, config: {} };
 
 async function api(route, body) {
   const res = await fetch(route, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -14,7 +14,14 @@ function say(text, isError = false) {
   $('message').className = isError ? 'error' : '';
 }
 
+/** Errors go to the message line and to a popup, so a refused save cannot go unnoticed. */
+function fail(what, e) {
+  say(`${what} failed: ${e.message}`, true);
+  alert(`${what} failed:\n\n${e.message}`);
+}
+
 const isCurrent = (p, d) => state.current && state.current.project === p && state.current.file === d.file;
+const currentDrawing = () => state.current && state.projects.find((p) => p.name === state.current.project)?.drawings.find((d) => d.file === state.current.file);
 
 function render() {
   const box = $('projects');
@@ -25,7 +32,13 @@ function render() {
     det.open = true;
     det.dataset.project = p.name;
     const sum = document.createElement('summary');
-    sum.textContent = `${p.name} (${p.drawings.length})`;
+    sum.append(Object.assign(document.createElement('span'), { className: 'name', textContent: `${p.name} (${p.drawings.length})` }));
+    if (state.config.sync) {
+      const sync = Object.assign(document.createElement('button'), { className: 'act', textContent: '⟳', title: `Commit ${p.name} to git (pushed only on ${state.config.syncBranch})` });
+      sync.dataset.action = 'sync';
+      sync.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); syncProject(p.name); };
+      sum.append(sync);
+    }
     const ul = document.createElement('ul');
     for (const d of p.drawings) {
       const li = document.createElement('li');
@@ -54,6 +67,11 @@ function render() {
   }
   $('project-names').replaceChildren(...state.projects.map((p) => Object.assign(document.createElement('option'), { value: p.name })));
   $('current').textContent = state.current ? `${state.current.project} / ${state.current.file}` : 'No drawing loaded';
+  const loaded = currentDrawing();
+  $('revert').disabled = !loaded?.backups;
+  $('revert').title = loaded?.backups
+    ? `Go back to the previous saved state of ${loaded.file} (${loaded.backups} kept)`
+    : 'No earlier saved state of the loaded drawing';
 }
 
 async function refreshList() {
@@ -75,47 +93,66 @@ async function refreshStatus() {
   } catch (e) { say(`Status failed: ${e.message}`, true); }
 }
 
-function setVersioned(on) {
-  $('save-versioned').checked = on;
-  $('save-button').textContent = on ? 'Save new version' : 'Save';
-}
-
-/** Versioned follows the loaded drawing: ticked for `<project>_v<i>` files, unticked for others. */
-function followVersioned(current) {
-  if (!current) return;
-  const d = state.projects.find((p) => p.name === current.project)?.drawings.find((x) => x.file === current.file);
-  if (d) setVersioned(d.version !== null);
-}
-
+// Unsaved changes are saved by the server first (into the loaded drawing, or tmp/); a refused save stops the load.
 async function load(project, file) {
   try {
-    let res;
-    try { res = await api('/api/load', { project, file }); } catch (e) {
-      if (e.status !== 409 || !e.data?.dirty) throw e;
-      const n = e.data.elementCount;
-      if (!confirm(`The canvas has unsaved changes (${n} element${n === 1 ? '' : 's'} on it). Loading replaces them.\n\nA backup copy goes to the hub's autosave folder first. Continue?`)) return;
-      res = await api('/api/load', { project, file, force: true });
-    }
+    const res = await api('/api/load', { project, file });
     state.current = res.current;
     $('save-project').value = project;
-    followVersioned(res.current);
-    say(`Loaded ${project}/${file} (${res.elementCount} elements)${res.autosaved ? `. The previous canvas was backed up to autosave/${res.autosaved}` : ''}`);
-    render();
+    const a = res.autosaved;
+    const note = !a ? '' : `. Your changes were saved to ${a.project}/${a.file} first${a.project === 'tmp' ? '' : ' (to undo: load it and press Revert)'}`;
+    say(`Loaded ${project}/${file} (${res.elementCount} elements)${note}`);
+    await refreshList();
     await refreshStatus();
-  } catch (e) { say(`Load failed: ${e.message}`, true); }
+  } catch (e) { fail('Load', e); }
 }
 
 async function save(ev) {
   ev.preventDefault();
   const project = $('save-project').value.trim();
+  const versioned = ev.submitter?.dataset.action === 'version';
   try {
-    const res = await api('/api/save', { project, label: $('save-label').value, versioned: $('save-versioned').checked });
+    const res = await api('/api/save', { project, label: $('save-label').value, versioned });
     state.current = res.current;
     $('save-label').value = '';
     say(`Saved ${res.current.project}/${res.current.file}${res.png ? ' and its .png' : ` (no .png: ${res.pngError})`}`, !res.png);
     await refreshList();
     await refreshStatus();
-  } catch (e) { say(`Save failed: ${e.message}`, true); }
+  } catch (e) { fail('Save', e); }
+}
+
+async function revert() {
+  const d = currentDrawing();
+  if (!d?.backups) return;
+  const where = `${state.current.project}/${d.file}`;
+  const note = state.dirty ? 'Your unsaved changes are dropped from the drawing (a copy is kept in the hub\'s backups folder).' : 'The current file is kept in the hub\'s backups folder.';
+  if (!confirm(`Revert ${where} to its ${state.dirty ? 'last' : 'previous'} saved state?\n\n${note}`)) return;
+  try {
+    const res = await api('/api/revert', { project: state.current.project, file: d.file });
+    const n = res.remaining;
+    say(`Reverted ${res.current.project}/${res.current.file} (${n} earlier state${n === 1 ? '' : 's'} left)`);
+    await refreshList();
+    await refreshStatus();
+  } catch (e) { fail('Revert', e); }
+}
+
+async function syncProject(project, answered = []) {
+  say(`Syncing ${project}…`);
+  try {
+    const res = await api('/api/sync', { project, confirm: answered });
+    if (res.needsConfirm) {
+      const question = `parent repo is on branch "${res.branch}", not "${res.syncBranch}".\n\nCommit ${project} on "${res.branch}" anyway? It will not be pushed.`;
+      return confirm(question) ? syncProject(project, [...answered, res.needsConfirm]) : say(`Sync of ${project} cancelled; nothing changed`);
+    }
+    if (res.nothing) return say(`Nothing to sync in ${project}`);
+    if (!res.push) return say(`Committed "${res.message}" on ${res.branch} (${res.sha}), not pushed`);
+    if (!res.pushed) return fail('Push', new Error(`Committed "${res.message}" (${res.sha}), but the push failed:\n${res.pushError}`));
+    const kept = res.keptLocal ? `; your ${res.keptLocal} other local commit(s) stay unpushed` : '';
+    const extra = res.onlyDrawings
+      ? `. Only the drawings went up${kept}. Run "git pull --rebase" on ${res.branch} before you push it yourself.`
+      : '';
+    say(`Synced: "${res.message}" (${res.sha}) pushed to ${res.branch}${extra}`);
+  } catch (e) { fail('Sync', e); }
 }
 
 async function rename(project, d) {
@@ -141,12 +178,11 @@ async function remove(project, d) {
 
 window.addEventListener('beforeunload', (ev) => { if (state.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 $('save-form').addEventListener('submit', save);
-$('save-versioned').addEventListener('change', (ev) => setVersioned(ev.target.checked));
+$('revert').addEventListener('click', revert);
 
-const config = await api('/api/config');
-$('canvas').src = config.canvasUrl;
+state.config = await api('/api/config');
+$('canvas').src = state.config.canvasUrl;
 await refreshList();
 await refreshStatus();
 if (state.current) $('save-project').value = state.current.project;
-followVersioned(state.current);
 setInterval(refreshStatus, 2000);

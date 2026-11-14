@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { createAutosave } from '../src/autosave.js';
+import { createBackups } from '../src/backups.js';
 import { createCanvas } from '../src/canvas.js';
 import { createServer } from '../src/server.js';
 import { createStore } from '../src/store.js';
@@ -39,7 +39,7 @@ function fakeCanvas() {
   return { state, server };
 }
 
-let dir, autosaveDir, canvas, hub, base;
+let dir, backupsDir, canvas, hub, base;
 const rect = (id, x = 0) => ({ id, type: 'rectangle', x, y: 0, width: 10, height: 10 });
 const post = (route, body, headers = {}) => fetch(base + route, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 const get = async (route) => (await fetch(base + route)).json();
@@ -47,18 +47,18 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-api-'));
-  autosaveDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-autosave-'));
+  backupsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-backups-'));
   await fs.mkdir(path.join(dir, 'budgeting'));
   await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), JSON.stringify({ elements: [rect('a'), rect('b')], appState: { viewBackgroundColor: '#fff9db' } }));
   await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'), 'png');
   canvas = fakeCanvas();
   const canvasUrl = await listen(canvas.server);
-  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), canvasPublicUrl: 'http://localhost:3000' });
+  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), backups: createBackups(backupsDir), canvasPublicUrl: 'http://localhost:3000' });
   base = await listen(hub);
   const port = new URL(base).port;
   // Re-create with the Host guard on, as main.js configures it.
   await new Promise((r) => hub.close(r));
-  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), autosave: createAutosave(autosaveDir), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
+  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), backups: createBackups(backupsDir), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
   await new Promise((r) => hub.listen(Number(port), '127.0.0.1', r));
 });
 afterEach(() => { canvas.server.close(); hub.close(); });
@@ -84,44 +84,130 @@ test('list → load → clean → edit → dirty → save new version → clean'
   assert.equal((await get('/api/status')).dirty, false);
 });
 
-test('load over unsaved work needs force', async () => {
+test('switching saves unsaved work into the loaded drawing first, backing up the old file', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const original = await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'));
+  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
   canvas.state.elements.set('x', rect('x'));
-  const res = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const res = await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).autosaved, { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), 'utf8'));
+  assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'x']);
+  assert.deepEqual([...canvas.state.elements.keys()], ['o'], 'then the other drawing is loaded');
+  const [backup] = await fs.readdir(path.join(backupsDir, 'budgeting', 'budgeting_v0_plan'));
+  assert.deepEqual(await fs.readFile(path.join(backupsDir, 'budgeting', 'budgeting_v0_plan', backup)), original, 'the old file is kept byte for byte');
+  const listed = (await get('/api/projects')).projects[0].drawings.find((d) => d.file === 'budgeting_v0_plan.excalidraw');
+  assert.equal(listed.backups, 1);
+});
+
+test('clicking the loaded drawing while dirty saves it and shows the saved state, not the old file', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  canvas.state.elements.set('x', rect('x'));
+  assert.equal((await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).status, 200);
+  assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'x']);
+  assert.equal((await get('/api/status')).dirty, false);
+  canvas.state.elements.set('y', rect('y'));
+  assert.equal((await post('/api/save', { project: 'budgeting', versioned: false })).status, 200, 'the next Save is not refused as "changed on disk"');
+});
+
+test('switching with nothing loaded saves to tmp/; with an empty canvas there is nothing to save', async () => {
+  canvas.state.elements.set('x', rect('x'));
+  const res = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
+  assert.deepEqual(res.autosaved, { project: 'tmp', file: 'tmp_v0.excalidraw' });
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'tmp', 'tmp_v0.excalidraw'), 'utf8')).elements.map((e) => e.id), ['x']);
+  canvas.state.elements.clear(); // e.g. the canvas restarted: dirty, but nothing to lose
+  const again = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
+  assert.equal(again.autosaved, null);
+});
+
+test('a refused save stops the switch and says why', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  canvas.state.elements.set('x', rect('x'));
+  await new Promise((r) => setTimeout(r, 20));
+  await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), JSON.stringify({ elements: [rect('git-pulled')] }));
+  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  const res = await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' });
   assert.equal(res.status, 409);
-  assert.deepEqual(await res.json(), { error: 'the canvas has unsaved changes', dirty: true, elementCount: 1 });
-  assert.equal(canvas.state.elements.has('x'), true, 'canvas untouched');
-  const forced = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', force: true });
-  assert.equal(forced.status, 200);
-  assert.deepEqual([...canvas.state.elements.keys()], ['a', 'b']);
-  // The replaced work was backed up first, expanded like a save, and the response names the backup.
-  const { autosaved } = await forced.json();
-  assert.match(autosaved, /^\d{4}-\d\d-\d\dT[\d-]+Z_unsaved\.excalidraw$/);
-  const backup = JSON.parse(await fs.readFile(path.join(autosaveDir, autosaved), 'utf8'));
-  assert.deepEqual(backup.elements.map((e) => e.id), ['x']);
-  assert.ok(backup.elements[0].seed, 'expanded');
+  const body = await res.json();
+  assert.equal(body.saveFailed, true);
+  assert.match(body.error, /could not be saved, so other\.excalidraw was not loaded.*changed on disk.*Save new version/);
+  assert.ok(canvas.state.elements.has('x'), 'canvas untouched');
+  assert.deepEqual((await get('/api/status')).current, { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.equal((await post('/api/load', { project: 'budgeting', file: 'missing.excalidraw' })).status, 404, 'a missing target saves nothing');
 });
 
-test('a clean load writes no backup; a backup that cannot be written stops the load', async () => {
-  const first = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
-  assert.equal(first.autosaved, null);
-  assert.deepEqual(await fs.readdir(autosaveDir), []);
-  canvas.state.elements.set('x', rect('x'));
-  await fs.rm(autosaveDir, { recursive: true });
-  await fs.writeFile(autosaveDir, 'a file where the folder should be');
-  const res = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', force: true });
-  assert.equal(res.status, 500);
-  assert.match((await res.json()).error, /could not back up the unsaved canvas, so nothing was loaded/);
-  assert.equal(canvas.state.elements.has('x'), true, 'canvas untouched');
-  assert.deepEqual((await get('/api/status')).current, first.current, 'still the loaded drawing');
-  await fs.rm(autosaveDir);
+test('revert restores the newest backup step by step and keeps what it replaced', async () => {
+  const file = path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw');
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  const v1 = await fs.readFile(file);
+  canvas.state.elements.set('c', rect('c'));
+  await post('/api/save', { project: 'budgeting', versioned: false });
+  const v2 = await fs.readFile(file);
+  canvas.state.elements.set('d', rect('d'));
+  await post('/api/save', { project: 'budgeting', versioned: false });
+  const v3 = await fs.readFile(file);
+  let res = await (await post('/api/revert', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
+  assert.equal(res.remaining, 1);
+  assert.equal(res.png, true);
+  assert.deepEqual(await fs.readFile(file), v2);
+  assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'c'], 'reverted state on the canvas');
+  assert.equal((await get('/api/status')).dirty, false);
+  await post('/api/revert', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.deepEqual(await fs.readFile(file), v1);
+  const none = await post('/api/revert', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.equal(none.status, 404);
+  const kept = await fs.readdir(path.join(backupsDir, '_reverted', 'budgeting', 'budgeting_v0_plan'));
+  const keptBytes = await Promise.all(kept.map((n) => fs.readFile(path.join(backupsDir, '_reverted', 'budgeting', 'budgeting_v0_plan', n))));
+  assert.deepEqual(keptBytes.map(String).sort(), [v2, v3].map(String).sort(), 'every replaced state is kept');
 });
 
-test('autosave keeps the newest files only', async () => {
-  const a = createAutosave(autosaveDir, 3);
-  const names = [];
-  for (let i = 0; i < 5; i++) names.push(await a.write({ elements: [] }, { project: 'p', file: 'p_v0.excalidraw' }));
-  assert.equal(new Set(names).size, 5, 'same-millisecond names stay distinct');
-  assert.equal((await fs.readdir(autosaveDir)).length, 3);
+test('revert with unsaved edits restores the last saved state and keeps the edits; only the loaded drawing', async () => {
+  const file = path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw');
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  canvas.state.elements.set('c', rect('c'));
+  await post('/api/save', { project: 'budgeting', versioned: false });
+  const lastSaved = await fs.readFile(file);
+  canvas.state.elements.set('edit', rect('edit')); // unsaved
+  const res = await post('/api/revert', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).remaining, 1, 'the earlier backup is still there');
+  assert.deepEqual(await fs.readFile(file), lastSaved);
+  assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'c']);
+  const dirR = path.join(backupsDir, '_reverted', 'budgeting', 'budgeting_v0_plan');
+  const [kept] = await fs.readdir(dirR);
+  assert.ok(JSON.parse(await fs.readFile(path.join(dirR, kept), 'utf8')).elements.some((e) => e.id === 'edit'), 'the unsaved edit is kept');
+  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  assert.equal((await post('/api/revert', { project: 'budgeting', file: 'other.excalidraw' })).status, 409, 'not the loaded drawing');
+});
+
+test('sync: off without git; passes only known confirmations to git', async () => {
+  assert.equal((await post('/api/sync', { project: 'budgeting' })).status, 404);
+  const seen = [];
+  const fakeGit = { syncBranch: 'dev', commit: async (p, c) => { seen.push(c); return { committed: true, push: true, message: 'm' }; }, push: async () => ({ pushed: true }) };
+  const s = createServer({ store: createStore(dir), canvas: createCanvas('http://127.0.0.1:1'), backups: createBackups(backupsDir), git: fakeGit, canvasPublicUrl: '' });
+  const url = await listen(s);
+  const r = await (await fetch(`${url}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: 'budgeting', confirm: ['ahead', 'evil', 'branch'] }) })).json();
+  assert.equal(r.pushed, true);
+  assert.deepEqual(seen, [['branch']]);
+  assert.deepEqual(await (await fetch(`${url}/api/config`)).json(), { canvasUrl: '', sync: true, syncBranch: 'dev' });
+  s.close();
+});
+
+test('backups follow a rename; delete and a new file of the same name do not inherit them', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  canvas.state.elements.set('c', rect('c'));
+  await post('/api/save', { project: 'budgeting', versioned: false });
+  await post('/api/rename', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', newBase: 'budgeting_v0_moved' });
+  const drawings = async () => (await get('/api/projects')).projects[0].drawings;
+  assert.equal((await drawings()).find((d) => d.file === 'budgeting_v0_moved.excalidraw').backups, 1);
+  await post('/api/delete', { project: 'budgeting', file: 'budgeting_v0_moved.excalidraw' });
+  await fs.writeFile(path.join(dir, 'budgeting', 'x.excalidraw'), JSON.stringify({ elements: [] }));
+  await post('/api/load', { project: 'budgeting', file: 'x.excalidraw' });
+  canvas.state.elements.set('n', rect('n'));
+  await post('/api/save', { project: 'budgeting', label: 'v0 moved', versioned: false });
+  assert.equal((await drawings()).find((d) => d.file === 'budgeting_v0_moved.excalidraw').backups, 0);
+  assert.equal((await fs.readdir(path.join(backupsDir, '_retired', 'budgeting'))).length, 1);
 });
 
 test('save expands agent shorthand with no tab, writes it back, and the canvas is clean right after', async () => {
@@ -239,7 +325,9 @@ test('deleting the loaded drawing makes the canvas count as unsaved', async () =
   assert.equal(s.current, null);
   assert.equal(s.dirty, true);
   await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
-  assert.equal((await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' })).status, 409, 'load asks before wiping it');
+  const res = await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).autosaved, { project: 'tmp', file: 'tmp_v0.excalidraw' }, 'nothing loaded any more: the work went to tmp/');
 });
 
 test('same-origin posts pass, oversized bodies are refused', async () => {
@@ -318,7 +406,7 @@ test('versioning off: a label or nothing loaded writes a plain name and never ov
 
   const refused = await post('/api/save', { project: 'budgeting', label: 'v0 plan', versioned: false });
   assert.equal(refused.status, 409, 'the label names a file that is not the loaded drawing');
-  assert.match((await refused.json()).error, /budgeting_v0_plan\.excalidraw already exists.*Versioned/);
+  assert.match((await refused.json()).error, /budgeting_v0_plan\.excalidraw already exists.*Save new version/);
   assert.equal(await fs.readFile(other, 'utf8'), before, 'other drawing untouched');
   assert.equal((await get('/api/status')).current.file, 'budgeting.excalidraw', 'current unchanged after refusal');
 

@@ -16,9 +16,15 @@ services:
       HUB_PORT: "${HUB_PORT:-3080}"
       CANVAS_URL: "${CANVAS_URL:-http://host.docker.internal:3000}"     # server -> canvas REST
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
-      DRAWINGS_DIR: /data
-      AUTOSAVE_DIR: /autosave
+      HOME: /home/node
+      REPO_DIR: /repo                          # parent repo's git repo, for the per-project sync button
+      DRAWINGS_DIR: /repo/docs/drawings
+      BACKUPS_DIR: /backups
+      SYNC_BRANCH: "${SYNC_BRANCH:-dev}"       # sync pushes only from this branch
     volumes:
-      - "${HUB_DRAWINGS:-../../docs/drawings}:/data"
-      - "${HUB_AUTOSAVE:-./autosave}:/autosave"   # backups taken before a forced load replaces unsaved work
+      - "${HUB_REPO:-../..}:/repo"
+      - "${HUB_BACKUPS:-./backups}:/backups"   # copies of overwritten drawings, for Revert
+      # Your git identity and SSH key, so sync commits as you and can push (key must have no passphrase).
+      - "${HOME}/.gitconfig:/home/node/.gitconfig:ro"
+      - "${HOME}/.ssh:/home/node/.ssh:ro"
     restart: unless-stopped

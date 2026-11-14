@@ -18,11 +18,20 @@ services:
       HUB_ALLOWED_HOSTS: "hub:3180,127.0.0.1:3180,localhost:3180"
       CANVAS_URL: http://canvas:3000
       CANVAS_PUBLIC_URL: http://canvas:3000
-      DRAWINGS_DIR: /data
-      AUTOSAVE_DIR: /autosave
+      HOME: /tmp
+      REPO_DIR: /repo
+      DRAWINGS_DIR: /repo/docs/drawings
+      BACKUPS_DIR: /backups
+      SYNC_BRANCH: dev
+      GIT_AUTHOR_NAME: e2e
+      GIT_AUTHOR_EMAIL: e2e@example.invalid
+      GIT_COMMITTER_NAME: e2e
+      GIT_COMMITTER_EMAIL: e2e@example.invalid
     volumes:
-      - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data"
-      - "${HUB_TEST_AUTOSAVE:?set by scripts/e2e.sh}:/autosave"
+      # A throwaway repo (fixtures under docs/drawings) whose origin is the bare repo at /remote. Never the real one.
+      - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo"
+      - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote"
+      - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups"
     depends_on: [canvas]
   e2e:
     build:
@@ -33,11 +42,13 @@ services:
     environment:
       HUB_URL: http://hub:3180
       CANVAS_URL: http://canvas:3000
-      DATA_DIR: /data
-      AUTOSAVE_DIR: /autosave
+      DATA_DIR: /repo/docs/drawings
+      BACKUPS_DIR: /backups
+      REMOTE_DIR: /remote
       HOME: /tmp
     volumes:
-      - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data:ro"
-      - "${HUB_TEST_AUTOSAVE:?set by scripts/e2e.sh}:/autosave:ro"
+      - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo:ro"
+      - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote:ro"
+      - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups:ro"
       - "./test-results:/e2e/test-results"
     depends_on: [hub]

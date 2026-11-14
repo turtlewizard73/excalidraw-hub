@@ -33,24 +33,21 @@ Each decision states what it is based on.
 - The canvas stores no appState. The hub remembers the loaded file's `appState` and writes it back on save (default `{viewBackgroundColor: "#ffffff", gridSize: null}`, as the MCP export writes).
 - **Known limits:** background or grid changes made in the canvas are not saved, and a loaded background colour is not shown. Based on: canvas source (`dist/server.js`, no appState route).
 
-### Save: versioning is an opt-in checkbox
-Changed 2026-11-05 at the user's request. The first version always wrote a new version and offered no overwrite. Based on: the user asked for a top-bar checkbox, off by default, that adds versioning.
-- **Checkbox on ("Versioned"):** writes `<project>_v<n>[_<label>].excalidraw`, where `n` is the highest `v<i>` in the folder plus one, or `0` when no file follows the scheme. It never overwrites.
-- **Checkbox off (default):**
+### Save: two buttons, "Save" and "Save new version"
+Changed 2026-11-05 (opt-in checkbox) and 2026-11-14 (two buttons, at the user's request; the checkbox is gone). The API keeps the `versioned` flag: "Save" sends `false`, "Save new version" sends `true`.
+- **"Save new version" (`versioned: true`):** writes `<project>_v<n>[_<label>].excalidraw`, where `n` is the highest `v<i>` in the folder plus one, or `0` when no file follows the scheme. It never overwrites.
+- **"Save" (`versioned: false`):**
   - No label and a drawing from this project is loaded: overwrites that drawing, like Save in an editor.
   - Otherwise: writes `<project>[_<label>].excalidraw`, and refuses (409) if that file exists. A label never overwrites, not even the loaded drawing. A label with no `a-z`/`0-9` is refused (400) rather than treated as no label.
 - Only the loaded drawing can be overwritten, so a mistyped label or project name cannot destroy another file. Overwrites replace the file atomically (synced temp file, then rename). Based on: an overwrite is the one way a save can lose data.
-- **An overwrite is refused (409) when something looks wrong.** The Versioned path still saves in these cases. Based on: independent review, 2026-11-05.
+- **An overwrite is refused (409) when something looks wrong.** "Save new version" still saves in these cases. Based on: independent review, 2026-11-05.
   - The canvas is empty but the drawing was not. The canvas is in-memory, so a restart would otherwise wipe the file.
   - A live image element's file is missing from the canvas.
   - The file changed on disk since load or save (mtime + size), e.g. `git pull` or an agent's export.
 - A load forgets the baseline before touching the canvas. If it fails or times out, the canvas may hold anything, so the next save must not treat it as the old drawing.
-- **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
+- **No confirm on overwrite.** Save on a loaded file is what the button says. Every overwrite first copies the old file to the backups folder, so Revert can bring it back (see "Revert").
 - **Known limits:** overwriting resets the file's mode to the default. A second tab showing an older drawing can overwrite the drawing loaded from the first tab until its 2 s poll catches up (accepted: narrow window, and the status poll shows the current file).
-- The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before this change shows "Save new version" and sends no flag; defaulting to off would make that click overwrite.
-- **The checkbox follows the loaded drawing** (changed 2026-11-14 at the user's request). Loading a `<project>_v<i>` file ticks it, so the next save writes a new version. Loading an unversioned file unticks it. The same happens when the page opens with a drawing already loaded. It can still be changed by hand afterwards.
-  - Based on: the user asked that opening a versioned file saves into a new version. Unticking for unversioned files is our addition: a box left ticked from an earlier drawing would otherwise surprise.
-  - With nothing loaded it starts off, as before. The checkbox itself is not remembered between page loads.
+- The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before the flag existed sends none; defaulting to off would make its click overwrite.
 - Saving into a new project name creates the folder.
 
 ### Listing and naming
@@ -88,17 +85,50 @@ Changed 2026-11-14 (plan `docs/plans/2026-11-14-hub-errors.md`). The first versi
 - `/api/status` reports `agentElements`, the count of agent-format elements on the canvas.
 - **Known limit:** estimated label sizes are approximate until a tab re-measures the text.
 
-### Forced load backs up the canvas first
-Added 2026-11-14 (E3: 70 unsaved agent elements were lost after the generic confirm).
-- Before a forced load over a dirty canvas, the hub writes the canvas (expanded, as a save would) to `AUTOSAVE_DIR` as `<timestamp>_<current drawing or "unsaved">.excalidraw`. It keeps the newest 50. If the backup cannot be written, the load is refused and the canvas is untouched.
-- If the load itself then fails, its error names the backup file.
-- The 409 for a dirty load carries the canvas element count, and the confirm names it and the backup folder. The load response names the backup file and the page shows it.
-- Compose mounts `./autosave` (gitignored) at `/autosave`. Based on: backups must not go into the git-tracked `docs/drawings`, and the hub must work when cloned alone.
+### Switching drawings saves first, no question
+Changed 2026-11-14 at the user's request. It replaces "Forced load backs up the canvas first" (confirm dialog + autosave folder).
+- Loading a drawing while the canvas has unsaved changes saves them first, in the same request, then loads:
+  - **A drawing is loaded:** overwrite it, exactly like "Save" (same guards, and the old file is copied to the backups folder first).
+  - **Nothing is loaded** (drawn from scratch or by an agent): save as the next version in the `tmp` project (`docs/drawings/tmp/tmp_v<n>.excalidraw`), creating the folder.
+  - **The save is refused** (overwrite guards): nothing is loaded and the page shows the reason in a popup. The message suggests "Save new version", which still saves in those cases.
+  - **The canvas is empty** (e.g. it restarted): nothing to save, the load goes ahead.
+- The load response names what was saved (`autosaved: {project, file}`); the page shows it. The `force` flag is gone; a caller that still sends it gets the save-first behaviour, which loses nothing.
+- Based on: the user wants no prompt on switching, and unsaved work must not be lost (E3).
+
+### Revert
+Added 2026-11-14 at the user's request.
+- Every overwrite (Save, or save-before-switch) first copies the file being replaced to `BACKUPS_DIR/<project>/<base>/<timestamp>.excalidraw`, newest 20 per drawing. Backups live outside `docs/drawings`, which is git-tracked; compose mounts `./backups` (gitignored).
+- **Revert** (button next to the save buttons) restores the loaded drawing's newest backup over the file, removes that backup and loads it onto the canvas; a second Revert goes one step further back. The file it replaces is kept in `_reverted`, which Revert never reads. The page asks first. The PNG is re-rendered.
+  - Only the loaded drawing can be reverted (409 otherwise).
+  - **Unsaved canvas edits** are saved over the file first, then the revert restores the backup that save made. Net effect: the drawing goes back to its last saved state, and the edits are kept in `_reverted`. If that save is refused, nothing is reverted. Based on: independent review, 2026-11-14 (the first version dropped the edits with no copy).
+- The listing reports `backups` per drawing; Revert is disabled when the loaded drawing has none. Rename moves a drawing's backups with it. Delete keeps them (not shown anywhere; safety copy).
+- Not built: browsing or choosing among older backups.
 
 ### PNG on save
 Added 2026-11-14 (E4).
 - After every save the hub asks the canvas to render the scene (`POST /api/export/image`, headless node renderer, no tab needed) and writes `<base>.png` next to the drawing atomically. An overwrite regenerates it, so the PNG is no longer stale.
 - Best-effort: if rendering fails, the save still succeeds and reports `pngError`.
+
+### Sync a project to git
+Added 2026-11-14 at the user's request.
+- Each project row has a sync button (right side, like rename and delete). It commits that project's folder in parent repo's repo:
+  1. Nothing changed under `docs/drawings/<project>`: say so, do nothing.
+  2. Check the repo. A detached HEAD or a merge, rebase, cherry-pick or revert in progress is refused with a message; nothing is touched.
+  3. Check the branch. On `SYNC_BRANCH` (default `dev`): commit and push. On any other branch: the page asks "commit anyway?"; yes commits **without pushing**. Based on the user: push only from dev.
+  4. On `SYNC_BRANCH`, only the drawings are ever published, with no question. Changed 2026-11-14 at the user's request (a "push them too?" confirm was rejected).
+  5. `git add -A -- <folder>`, then `git commit -m "<project> <names> diagram update" -- <folder>`. The pathspec commits only that folder, so other staged or changed files in the repo stay out. `<names>` are the changed drawings without the `<project>_` prefix (`chartroom v2 diagram update`), comma-separated, at most 5 then `+N more`.
+  6. Push, after `git fetch origin <SYNC_BRANCH>`:
+     - Local branch exactly one commit (this one) ahead of origin: plain `git push`.
+     - Plain push is pinned to the commit (`<sha>:refs/heads/<SYNC_BRANCH>`), so a commit landing meanwhile is not pushed with it.
+     - Otherwise (other local unpushed commits, or origin moved on): the commit is **cherry-picked** onto `origin/<SYNC_BRANCH>` in a throwaway detached worktree (`git worktree add`, removed afterwards) and pushed as `HEAD:refs/heads/<SYNC_BRANCH>`. Only this commit's change goes up, so changes made on origin meanwhile are kept, even in the same folder. Where both sides changed the same file, this commit's version of that file wins. Other local commits stay local.
+     - Local and origin then each hold a copy. `git pull --rebase` drops the local copy because the patches match (tested, also for repeated syncs). It can still conflict if an earlier local-only commit touched the same drawing; then it is resolved by hand. The page says to run it before pushing the branch by hand.
+     - No `git worktree prune`: inside the container the user's own worktrees look missing and would be unregistered (independent review).
+     - Based on: simpler than branching out and squash-merging back, and it never touches the user's checkout or working tree. Replacing the whole folder instead (first version) silently reverted changes made on origin (independent review).
+     - If the push fails, the local commit stays and the page shows git's error. Pushes run one at a time.
+- **How:** the hub image adds `git` and `openssh-client`. Compose mounts parent repo's root read-write at `/repo` (drawings are `/repo/docs/drawings`), and the host's `~/.ssh` and `~/.gitconfig` read-only, so commits carry the user's identity and push with the user's key (no passphrase). Commands run through `execFile` with fixed arguments; the project name is validated like every other name.
+- With no `REPO_DIR` the feature is off: `/api/config` says `sync: false` and the button is hidden. The hub still works when cloned alone.
+- **Accepted risk:** the container can write anywhere in the parent repo repo and push with the user's key. Requests are limited as before (loopback port, Host allowlist, same-origin JSON only).
+- Not built: pull, conflict handling, choosing a branch.
 
 ### Server: Node 20 built-ins, no framework
 - About six JSON routes plus static files. `node:http` and `node:test` cover this with zero dependencies, no lockfile and no install step. Based on: SMORES Simple; "build your own only when clearly cheaper": a router this size is ~40 lines, cheaper than adding and pinning express.
@@ -114,7 +144,7 @@ Added 2026-11-14 (E4).
 - Container runs as the host user (`UID`/`GID` from `.env`, default 1000) so files in the repo aren't root-owned.
 
 ### Docker and networking
-- `compose.yaml`: one `hub` service on the default bridge network, published on `127.0.0.1:3080`. It reaches the canvas at `http://host.docker.internal:3000` (`extra_hosts: host-gateway`). The iframe uses `http://localhost:3000`. Drawings are mounted from `${HUB_DRAWINGS:-../../docs/drawings}`. It expects the parent repo canvas to be running.
+- `compose.yaml`: one `hub` service on the default bridge network, published on `127.0.0.1:3080`. Since 2026-11-14 it mounts the parent repo root (`/repo`), `./backups`, `~/.ssh` and `~/.gitconfig` (see "Sync a project to git"). It reaches the canvas at `http://host.docker.internal:3000` (`extra_hosts: host-gateway`). The iframe uses `http://localhost:3000`. Drawings are mounted from `${HUB_DRAWINGS:-../../docs/drawings}`. It expects the parent repo canvas to be running.
 - **Not host networking.** This Docker is Docker Desktop (`docker info`): `network_mode: host` binds inside its VM, so WSL and Windows could not reach the hub (observed 2026-11-02). Published ports are forwarded to WSL, as the canvas on `:3000` shows.
 - `compose.test.yaml`: its own canvas, a hub over a fixture copy and a Playwright runner (image and npm package both `1.56.1`), talking over the compose network by service name. Tests never touch port 3000 or the real drawings.
 

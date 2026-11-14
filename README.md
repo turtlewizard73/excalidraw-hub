@@ -21,12 +21,14 @@ cp .env.example .env          # once: saved files get your UID/GID
 docker compose up -d --build
 ```
 
-Open http://localhost:3080. Stop it with `docker compose down`. Details and overrides (port, drawings folder, canvas URL) are in [docs/setup.md](docs/setup.md).
+Open http://localhost:3080. Stop it with `docker compose down`. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md).
 
 ## Use
-- **Load:** click a drawing in the sidebar. It replaces what is on the shared canvas, and asks first if the canvas has unsaved changes. If you go ahead, the hub first copies the canvas to `autosave/` (newest 50 kept) and names the file.
+- **Load:** click a drawing in the sidebar. It replaces what is on the shared canvas. Unsaved changes are saved first, without asking: into the loaded drawing, or as `tmp/tmp_v<n>` when nothing was loaded. If that save is refused, a popup says why and nothing is loaded.
 - **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder. Every save also writes `<name>.png` next to the drawing.
-- **Versioned checkbox:** follows the loaded drawing: ticked after loading a `<project>_v<i>` file, unticked after loading any other file, off when nothing is loaded. Tick it and the button becomes "Save new version", which writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
+- **Save new version:** writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
+- **Revert:** every overwrite first keeps the old file in `backups/` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first, and the file it replaces is kept too.
+- **Sync (⟳ on a project):** commits that project's folder in parent repo's git repo as "`<project> <names> diagram update`", only that folder. On `dev` it also pushes, and only the drawings: other unpushed commits on `dev` stay local (then run `git pull --rebase` before pushing `dev` yourself; the message says so). On any other branch it asks, then commits without pushing.
 - **Rename / delete:** hover a drawing and use ✎ or 🗑. The `.png` with the same name moves or goes with it. Delete asks first.
 - **Agents:** an agent can save with `POST /api/save` without any browser tab open. Elements it drew in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save, and the canvas is updated to match. `GET /api/status` shows how many such elements are waiting (`agentElements`).
 - **Unsaved badge:** "● Unsaved changes" after a real edit, "Saved" after a load or save. Leaving the page with unsaved changes shows the browser's warning.
@@ -35,21 +37,21 @@ The sidebar marks the highest version of each project as "latest". Files that do
 
 ## Test
 ```bash
-docker run --rm -v "$PWD:/app:ro" -w /app node:20-slim node --test test/   # unit + API
-scripts/e2e.sh                                                            # browser tests, Playwright in Docker
+docker build -t excalidraw-hub-unit . && docker run --rm -u 1000:1000 -e HOME=/tmp -v "$PWD:/app:ro" -w /app excalidraw-hub-unit node --test test/   # unit + API + real git (the image has git)
+scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git repo
 ```
-`scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a temporary copy of `fixtures/`. It never touches port 3000 or the real drawings.
+`scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a throwaway git repo holding a copy of `fixtures/`, with a bare repo as its origin. It never touches port 3000, the real drawings or parent repo's git.
 
 ## Layout
 | Path | What it is |
 |---|---|
-| `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `autosave.js` (backups before a forced load), `canvas.js` (canvas client), `server.js` (HTTP API) |
-| `autosave/` | Canvas backups taken before a forced load (gitignored) |
+| `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `backups.js` (copies for Revert), `git.js` (sync), `canvas.js` (canvas client), `server.js` (HTTP API) |
+| `backups/` | Copies of overwritten drawings, for Revert (gitignored) |
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |
 | `test/`, `e2e/` | Unit/API tests (`node --test`) and Playwright browser tests |
 | `fixtures/` | Test drawings: copies of parent repo's drawings plus an image test |
 | `probe/` | Scripts that checked the canvas behaviour the design relies on |
-| `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md)), [setup](docs/setup.md) |
+| `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md), [save/revert/sync](docs/plans/2026-11-14-save-revert-sync.md)), [setup](docs/setup.md) |
 
 ## Limits
 - Background and grid changes made in the canvas are not saved, because the canvas does not expose them. A saved drawing keeps the background it was loaded with.

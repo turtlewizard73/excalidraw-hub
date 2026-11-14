@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DATA = process.env.DATA_DIR;
-const AUTOSAVE = process.env.AUTOSAVE_DIR;
+const BACKUPS = process.env.BACKUPS_DIR;
+const remoteDev = () => fs.readFileSync(path.join(process.env.REMOTE_DIR, 'refs/heads/dev'), 'utf8').trim();
 const CANVAS = process.env.CANVAS_URL;
 const readDoc = (rel) => JSON.parse(fs.readFileSync(path.join(DATA, rel), 'utf8'));
 const exists = (rel) => fs.existsSync(path.join(DATA, rel));
@@ -22,6 +23,13 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(async () => { await page.close(); });
 
 async function drawRectangle() {
+  const before = await canvasCount();
+  await drawRectangleOnly();
+  // The badge can turn on before the tab has synced the new rectangle; wait for the canvas server to hold it.
+  await expect.poll(canvasCount, { timeout: 10000 }).toBe(before + 1);
+}
+
+async function drawRectangleOnly() {
   const frame = page.frameLocator('#canvas');
   await frame.locator('[data-testid="toolbar-rectangle"]').click({ force: true });
   const box = await page.locator('#canvas').boundingBox();
@@ -32,9 +40,11 @@ async function drawRectangle() {
   await frame.locator('[data-testid="toolbar-selection"]').click({ force: true });
 }
 
-test('versioning checkbox is off by default', async () => {
-  await expect(page.getByTestId('save-versioned')).not.toBeChecked();
+test('save buttons: Save and Save new version; Revert off with nothing loaded', async () => {
   await expect(page.getByTestId('save')).toHaveText('Save');
+  await expect(page.getByTestId('save-version')).toHaveText('Save new version');
+  await expect(page.getByTestId('revert')).toBeDisabled();
+  await expect(page.locator('#save-versioned')).toHaveCount(0);
 });
 
 test('list: projects and versions, latest marked, off-scheme files listed plainly', async () => {
@@ -60,33 +70,9 @@ test('load: drawing appears on the canvas and the page is clean', async () => {
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
 });
 
-test('versioned: follows the loaded drawing (ticked for _v<i> files, unticked for others)', async ({ browser }) => {
-  // budgeting_v1_plan_with_proposal is loaded by the previous test.
-  await expect(page.getByTestId('save-versioned')).toBeChecked();
-  await expect(page.getByTestId('save')).toHaveText('Save new version');
-  await drawing(page, 'board-before-clear.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('ai-map / board-before-clear.excalidraw');
-  await expect(page.getByTestId('save-versioned')).not.toBeChecked();
-  await expect(page.getByTestId('save')).toHaveText('Save');
-  await drawing(page, 'budgeting_v1_plan_with_proposal.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v1_plan_with_proposal.excalidraw');
-  await expect(page.getByTestId('save-versioned')).toBeChecked();
-  // A page opened later with a versioned drawing already loaded starts ticked too.
-  const other = await browser.newPage();
-  await other.goto(process.env.HUB_URL);
-  await expect(other.getByTestId('save-versioned')).toBeChecked();
-  await other.close();
-});
-
-test('unsaved: drawing in the canvas shows the indicator, and loading asks first', async () => {
+test('unsaved: drawing in the canvas shows the indicator', async () => {
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
-  let message = '';
-  page.once('dialog', (d) => { message = d.message(); d.dismiss(); });
-  await drawing(page, 'budgeting_v0_plan.excalidraw').locator('button.open').click();
-  await expect.poll(() => message).toContain('unsaved changes');
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v1_plan_with_proposal.excalidraw');
-  await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes');
 });
 
 test('unsaved: leaving the page warns', async () => {
@@ -105,12 +91,10 @@ test('unsaved: leaving the page warns', async () => {
 });
 
 test('save: writes the next version with the edit and becomes clean', async () => {
-  await page.getByTestId('save-versioned').check();
-  await expect(page.getByTestId('save')).toHaveText('Save new version');
   const before = readDoc('budgeting/budgeting_v1_plan_with_proposal.excalidraw').elements.length;
   await page.getByTestId('save-project').fill('budgeting');
   await page.getByTestId('save-label').fill('E2E edit');
-  await page.getByTestId('save').click();
+  await page.getByTestId('save-version').click();
   await expect(page.getByTestId('message')).toHaveText('Saved budgeting/budgeting_v2_e2e_edit.excalidraw and its .png');
   const saved = readDoc('budgeting/budgeting_v2_e2e_edit.excalidraw');
   expect(saved.elements.length).toBe(before + 1);
@@ -125,8 +109,7 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   await expect(page.getByTestId('current')).toHaveText('image-test / image-test_v0_red_png.excalidraw');
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
-  await page.getByTestId('save-versioned').check();
-  await page.getByTestId('save').click();
+  await page.getByTestId('save-version').click();
   await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw and its .png');
   const orig = readDoc('image-test/image-test_v0_red_png.excalidraw');
   const saved = readDoc('image-test/image-test_v1.excalidraw');
@@ -137,9 +120,7 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   expect(fd.points).toEqual(orig.elements.find((e) => e.type === 'freedraw').points);
 });
 
-test('save with versioning off: overwrites the loaded drawing, adds no file, refuses to overwrite another', async () => {
-  await page.getByTestId('save-versioned').uncheck();
-  await expect(page.getByTestId('save')).toHaveText('Save');
+test('Save: overwrites the loaded drawing, adds no file, refuses to overwrite another in a popup', async () => {
   const file = 'image-test/image-test_v1.excalidraw';
   const before = readDoc(file).elements.length;
   const listed = fs.readdirSync(path.join(DATA, 'image-test')).sort();
@@ -151,28 +132,44 @@ test('save with versioning off: overwrites the loaded drawing, adds no file, ref
   expect(readDoc(file).elements.length).toBe(before + 1);
   expect(fs.readdirSync(path.join(DATA, 'image-test')).sort()).toEqual(listed);
   await page.getByTestId('save-label').fill('v0 red png');
+  let popup = '';
+  page.once('dialog', (d) => { popup = d.message(); d.accept(); });
   await page.getByTestId('save').click();
   await expect(page.getByTestId('message')).toContainText('already exists');
+  await expect.poll(() => popup).toContain('image-test_v0_red_png.excalidraw already exists');
   expect(readDoc('image-test/image-test_v0_red_png.excalidraw').elements.length).toBe(3);
   await page.getByTestId('save-label').fill('');
 });
 
-test('unsaved: accepting a load backs the canvas up first and says where', async () => {
-  const onCanvas = readDoc('image-test/image-test_v1.excalidraw').elements.length + 1;
+test('Revert: brings back the state before the last Save, then is off again', async () => {
+  const file = 'image-test/image-test_v1.excalidraw';
+  const n = readDoc(file).elements.length; // after the overwrite in the previous test
+  await expect(page.getByTestId('revert')).toBeEnabled();
+  let popup = '';
+  page.once('dialog', (d) => { popup = d.message(); d.accept(); });
+  await page.getByTestId('revert').click();
+  await expect(page.getByTestId('message')).toHaveText('Reverted image-test/image-test_v1.excalidraw (0 earlier states left)');
+  expect(popup).toContain('Revert image-test/image-test_v1.excalidraw to its previous saved state?');
+  expect(readDoc(file).elements.length).toBe(n - 1);
+  expect(await canvasCount()).toBe(n - 1);
+  await expect(page.getByTestId('revert')).toBeDisabled();
+  await expect(page.getByTestId('dirty')).toHaveText('Saved');
+});
+
+test('switching drawings saves unsaved changes into the open file without asking', async () => {
+  const file = 'image-test/image-test_v1.excalidraw';
+  const n = readDoc(file).elements.length;
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
-  let message = '';
-  page.once('dialog', (d) => { message = d.message(); d.accept(); });
+  let asked = false;
+  page.once('dialog', (d) => { asked = true; d.dismiss(); });
   await drawing(page, 'budgeting_v0_plan.excalidraw').locator('button.open').click();
   await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v0_plan.excalidraw');
-  expect(message).toContain(`(${onCanvas} elements on it)`);
-  expect(message).toContain('autosave folder');
-  await expect(page.getByTestId('message')).toContainText('The previous canvas was backed up to autosave/');
-  const name = (await page.getByTestId('message').textContent()).split('autosave/')[1];
-  expect(name).toMatch(/_image-test_v1\.excalidraw$/);
-  const backup = JSON.parse(fs.readFileSync(path.join(AUTOSAVE, name), 'utf8'));
-  expect(backup.elements.length).toBe(onCanvas);
-  expect(backup.files).toBeTruthy();
+  await expect(page.getByTestId('message')).toContainText('Your changes were saved to image-test/image-test_v1.excalidraw first (to undo: load it and press Revert)');
+  expect(asked).toBe(false);
+  expect(readDoc(file).elements.length).toBe(n + 1);
+  expect(fs.readdirSync(path.join(BACKUPS, 'image-test', 'image-test_v1')).length).toBe(1);
+  page.removeAllListeners('dialog');
 });
 
 test('rename: moves the file, keeps the current drawing in sync', async () => {
@@ -194,6 +191,18 @@ test('rename: refuses traversal and existing names', async () => {
   await drawing(page, 'budgeting_v2_renamed.excalidraw').locator('[data-action="rename"]').click({ force: true });
   await expect(page.getByTestId('message')).toContainText('already exists');
   expect(exists('budgeting/budgeting_v2_renamed.excalidraw')).toBe(true);
+});
+
+test('sync: on dev, commits the project folder and pushes; then nothing to sync', async () => {
+  const before = remoteDev();
+  await page.locator('details[data-project="budgeting"] summary [data-action="sync"]').click({ force: true });
+  await expect(page.getByTestId('message')).toContainText('Synced: "budgeting ', { timeout: 30000 });
+  await expect(page.getByTestId('message')).toContainText('diagram update"');
+  await expect(page.getByTestId('message')).toContainText('pushed to dev');
+  expect(remoteDev()).not.toBe(before);
+  await page.locator('details[data-project="budgeting"] summary [data-action="sync"]').click({ force: true });
+  await expect(page.getByTestId('message')).toHaveText('Nothing to sync in budgeting');
+  await expect(page.locator('details[data-project="budgeting"]')).toHaveAttribute('open', '');
 });
 
 test('delete: cancel keeps the file, confirm removes it and its png', async () => {

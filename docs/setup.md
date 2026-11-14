@@ -12,11 +12,16 @@ cp .env.example .env    # once; sets UID/GID so saved drawings are owned by you
 docker compose up -d --build
 # open http://localhost:3080
 ```
-The hub mounts parent repo's `docs/drawings` (override with `HUB_DRAWINGS`) and `./autosave` for backups taken before a forced load (override with `HUB_AUTOSAVE`). Loading a drawing replaces whatever is on the shared canvas, after a confirm if it has unsaved changes.
+The hub mounts:
+- parent repo's root at `/repo` (override with `HUB_REPO`); drawings are its `docs/drawings`. Read-write, for saving and for the sync button's `git add/commit/push`.
+- `./backups` for Revert (override with `HUB_BACKUPS`).
+- `~/.gitconfig` and `~/.ssh`, read-only: sync commits as you and pushes with your SSH key. The key must have no passphrase (there is no agent in the container). `SYNC_BRANCH` (default `dev`) is the only branch sync pushes from.
+
+The image installs `git` and `openssh-client` (Debian packages, `Dockerfile`).
 
 ## Test
 ```bash
-docker run --rm -v "$PWD:/app:ro" -w /app node:20-slim node --test test/   # unit + API
-scripts/e2e.sh                                                            # isolated canvas :3100 + hub :3180 + Playwright
+docker build -t excalidraw-hub-unit . && docker run --rm -u 1000:1000 -e HOME=/tmp -v "$PWD:/app:ro" -w /app excalidraw-hub-unit node --test test/
+scripts/e2e.sh   # isolated canvas :3100 + hub :3180 + Playwright, throwaway git repo + bare origin
 ```
-`scripts/e2e.sh` copies `fixtures/` to a temp folder and uses a temp autosave folder. It never touches port 3000 or `docs/drawings`.
+`scripts/e2e.sh` builds a throwaway git repo from `fixtures/` with a bare origin and a temp backups folder. It never touches port 3000, `docs/drawings` or parent repo's git. Needs `git` in WSL.

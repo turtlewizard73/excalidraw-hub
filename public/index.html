@@ -18,8 +18,9 @@
         <input id="save-project" data-testid="save-project" list="project-names" placeholder="project" required>
         <datalist id="project-names"></datalist>
         <input id="save-label" data-testid="save-label" placeholder="label (optional)">
-        <label id="versioned" title="Save as the next version (_v1, _v2, ...) instead of saving over the loaded drawing"><input type="checkbox" id="save-versioned" data-testid="save-versioned" autocomplete="off"> Versioned</label>
-        <button type="submit" id="save-button" data-testid="save">Save</button>
+        <button type="submit" data-action="save" data-testid="save" title="Save over the loaded drawing (the old file is kept for Revert)">Save</button>
+        <button type="submit" data-action="version" data-testid="save-version" title="Save as the next version (_v1, _v2, ...)">Save new version</button>
+        <button type="button" id="revert" data-testid="revert" disabled title="Go back to the loaded drawing's previous saved state">Revert</button>
       </form>
       <span id="message" data-testid="message" role="status"></span>
     </header>

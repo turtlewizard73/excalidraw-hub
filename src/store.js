@@ -96,6 +96,13 @@ export function createStore(rootDir) {
       return doc;
     },
 
+    /** The file's bytes, or null if it does not exist. */
+    async readBytes(project, file) {
+      const p = await resolve(project, file);
+      if (!(await isFile(p))) return null;
+      return fs.readFile(p);
+    },
+
     /** Write a new file; never overwrites. Creates the project folder if needed. */
     async create(project, file, doc) {
       const p = await resolve(project, file);
