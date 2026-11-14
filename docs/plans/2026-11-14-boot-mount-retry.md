@@ -12,7 +12,7 @@ Spec: `docs/specs/2026-11-02-excalidraw-hub.md`, "Docker and networking", "Boot 
 Not built: a Windows logon task or WSL startup script, and checks on other mounts (see spec).
 
 ## Outcome
-Done 2026-11-14 on `feat/boot-mount-retry`, not yet merged or deployed. The hub exits with "drawings folder /data is empty (bind mount not connected yet?)" when the folder is missing or empty. `restart: unless-stopped` then retries it.
+Done 2026-11-14. Squash-merged to `main` (740f70b) and deployed the same day. The hub exits with "drawings folder /data is empty (bind mount not connected yet?)" when the folder is missing or empty. `restart: unless-stopped` then retries it.
 - Evidence: 73 unit/API tests (3 new) and 14 e2e pass. A throwaway container with an empty `/data` restarted 12 times, then served ~3 s after a drawing was added.
 - Differed: README also states that the drawings folder must not be empty (review finding).
 - Learned: Docker retries a container that exits immediately, with growing backoff. The 10 s rule only resets the backoff.
