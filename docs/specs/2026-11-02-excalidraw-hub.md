@@ -48,7 +48,9 @@ Changed 2026-11-05 at the user's request. The first version always wrote a new v
 - **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
 - **Known limits:** overwriting resets the file's mode to the default. A second tab showing an older drawing can overwrite the drawing loaded from the first tab until its 2 s poll catches up (accepted: narrow window, and the status poll shows the current file).
 - The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before this change shows "Save new version" and sends no flag; defaulting to off would make that click overwrite.
-- The checkbox is not remembered between page loads. Based on: "default off".
+- **The checkbox follows the loaded drawing** (changed 2026-11-14 at the user's request). Loading a `<project>_v<i>` file ticks it, so the next save writes a new version. Loading an unversioned file unticks it. The same happens when the page opens with a drawing already loaded. It can still be changed by hand afterwards.
+  - Based on: the user asked that opening a versioned file saves into a new version. Unticking for unversioned files is our addition: a box left ticked from an earlier drawing would otherwise surprise.
+  - With nothing loaded it starts off, as before. The checkbox itself is not remembered between page loads.
 - Saving into a new project name creates the folder.
 
 ### Listing and naming

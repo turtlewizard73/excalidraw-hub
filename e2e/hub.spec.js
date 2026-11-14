@@ -60,6 +60,24 @@ test('load: drawing appears on the canvas and the page is clean', async () => {
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
 });
 
+test('versioned: follows the loaded drawing (ticked for _v<i> files, unticked for others)', async ({ browser }) => {
+  // budgeting_v1_plan_with_proposal is loaded by the previous test.
+  await expect(page.getByTestId('save-versioned')).toBeChecked();
+  await expect(page.getByTestId('save')).toHaveText('Save new version');
+  await drawing(page, 'board-before-clear.excalidraw').locator('button.open').click();
+  await expect(page.getByTestId('current')).toHaveText('ai-map / board-before-clear.excalidraw');
+  await expect(page.getByTestId('save-versioned')).not.toBeChecked();
+  await expect(page.getByTestId('save')).toHaveText('Save');
+  await drawing(page, 'budgeting_v1_plan_with_proposal.excalidraw').locator('button.open').click();
+  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v1_plan_with_proposal.excalidraw');
+  await expect(page.getByTestId('save-versioned')).toBeChecked();
+  // A page opened later with a versioned drawing already loaded starts ticked too.
+  const other = await browser.newPage();
+  await other.goto(process.env.HUB_URL);
+  await expect(other.getByTestId('save-versioned')).toBeChecked();
+  await other.close();
+});
+
 test('unsaved: drawing in the canvas shows the indicator, and loading asks first', async () => {
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });

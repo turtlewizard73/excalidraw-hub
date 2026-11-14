@@ -75,6 +75,18 @@ async function refreshStatus() {
   } catch (e) { say(`Status failed: ${e.message}`, true); }
 }
 
+function setVersioned(on) {
+  $('save-versioned').checked = on;
+  $('save-button').textContent = on ? 'Save new version' : 'Save';
+}
+
+/** Versioned follows the loaded drawing: ticked for `<project>_v<i>` files, unticked for others. */
+function followVersioned(current) {
+  if (!current) return;
+  const d = state.projects.find((p) => p.name === current.project)?.drawings.find((x) => x.file === current.file);
+  if (d) setVersioned(d.version !== null);
+}
+
 async function load(project, file) {
   try {
     let res;
@@ -86,6 +98,7 @@ async function load(project, file) {
     }
     state.current = res.current;
     $('save-project').value = project;
+    followVersioned(res.current);
     say(`Loaded ${project}/${file} (${res.elementCount} elements)${res.autosaved ? `. The previous canvas was backed up to autosave/${res.autosaved}` : ''}`);
     render();
     await refreshStatus();
@@ -128,11 +141,12 @@ async function remove(project, d) {
 
 window.addEventListener('beforeunload', (ev) => { if (state.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 $('save-form').addEventListener('submit', save);
-$('save-versioned').addEventListener('change', (ev) => { $('save-button').textContent = ev.target.checked ? 'Save new version' : 'Save'; });
+$('save-versioned').addEventListener('change', (ev) => setVersioned(ev.target.checked));
 
 const config = await api('/api/config');
 $('canvas').src = config.canvasUrl;
 await refreshList();
 await refreshStatus();
 if (state.current) $('save-project').value = state.current.project;
+followVersioned(state.current);
 setInterval(refreshStatus, 2000);
