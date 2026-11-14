@@ -78,9 +78,6 @@ export class Baseline {
   }
 }
 
-/** Agent-format elements the canvas stores until a browser tab re-syncs them. */
-export const hasShorthand = (elements) => elements.some((e) => 'label' in e || 'start' in e || 'end' in e);
-
 /** File ids that live image elements use but the canvas no longer holds. */
 export function missingFiles(elements, files) {
   return live(elements).filter((e) => e.type === 'image' && e.fileId && !files?.[e.fileId]).map((e) => e.fileId);

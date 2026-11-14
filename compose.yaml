@@ -17,6 +17,8 @@ services:
       CANVAS_URL: "${CANVAS_URL:-http://host.docker.internal:3000}"     # server -> canvas REST
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
       DRAWINGS_DIR: /data
+      AUTOSAVE_DIR: /autosave
     volumes:
       - "${HUB_DRAWINGS:-../../docs/drawings}:/data"
+      - "${HUB_AUTOSAVE:-./autosave}:/autosave"   # backups taken before a forced load replaces unsaved work
     restart: unless-stopped

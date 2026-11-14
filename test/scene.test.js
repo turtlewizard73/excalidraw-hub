@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Baseline, buildDocument, hasShorthand, strictForm, tolerantlyEqual } from '../src/scene.js';
+import { Baseline, buildDocument, strictForm, tolerantlyEqual } from '../src/scene.js';
 
 const rect = (over = {}) => ({ id: 'r1', type: 'rectangle', x: 10, y: 20, width: 100, height: 50, roundness: null, boundElements: null, version: 3, versionNonce: 9, ...over });
 const label = (over = {}) => ({ id: 't1', type: 'text', text: 'hi', x: 15, y: 25, width: 40.86, height: 25, containerId: 'r1', ...over });
@@ -68,8 +68,3 @@ test('buildDocument strips server keys, deleted elements and unreferenced files;
   assert.deepEqual(buildDocument([], {}, null).appState, { viewBackgroundColor: '#ffffff', gridSize: null });
 });
 
-test('hasShorthand spots agent-format elements', () => {
-  assert.equal(hasShorthand([rect()]), false);
-  assert.equal(hasShorthand([rect({ label: { text: 'x' } })]), true);
-  assert.equal(hasShorthand([{ id: 'a', type: 'arrow', start: { id: 'r1' } }]), true);
-});

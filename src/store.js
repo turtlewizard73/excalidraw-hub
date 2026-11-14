@@ -48,12 +48,12 @@ export function createStore(rootDir) {
 
   const exists = (p) => fs.lstat(p).then(() => true, () => false);
 
-  /** Write `doc` to a synced temp file beside `p`; removes it again on failure. */
+  /** Write `doc` (an object as JSON, or bytes) to a synced temp file beside `p`; removes it again on failure. */
   async function writeTemp(p, file, doc) {
     const tmp = path.join(path.dirname(p), `.${file}.${crypto.randomUUID()}.tmp`);
     try {
       const h = await fs.open(tmp, 'wx');
-      try { await h.writeFile(JSON.stringify(doc, null, 2) + '\n'); await h.sync(); } finally { await h.close(); }
+      try { await h.writeFile(Buffer.isBuffer(doc) ? doc : JSON.stringify(doc, null, 2) + '\n'); await h.sync(); } finally { await h.close(); }
     } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
     return tmp;
   }
@@ -117,6 +117,14 @@ export function createStore(rootDir) {
       await fs.mkdir(path.dirname(p), { recursive: true });
       const tmp = await writeTemp(p, file, doc);
       try { await fs.rename(tmp, p); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
+    },
+
+    /** Replace the drawing's same-named .png atomically. Refuses if that name is not a regular file. */
+    async writePng(project, file, bytes) {
+      const png = pngOf(await resolve(project, file));
+      if (await exists(png) && !(await isFile(png))) throw new StoreError(409, `${path.basename(png)} is not a regular file`);
+      const tmp = await writeTemp(png, path.basename(png), bytes);
+      try { await fs.rename(tmp, png); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
     },
 
     /** Rename within the project; the same-named .png moves along. */

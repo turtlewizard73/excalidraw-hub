@@ -25,6 +25,13 @@ export function createCanvas(baseUrl) {
     async elements() { return (await call('GET', '/api/elements')).elements ?? []; },
     async files() { return (await call('GET', '/api/files')).files ?? {}; },
 
+    /** The scene as PNG bytes, rendered by the canvas (headless node renderer; needs no browser tab). */
+    async exportPng() {
+      const { data } = await call('POST', '/api/export/image', { format: 'png' });
+      if (typeof data !== 'string' || !data) throw new CanvasError('canvas export returned no image');
+      return Buffer.from(data.slice(data.indexOf(',') + 1), 'base64');
+    },
+
     /** Replace the canvas scene with `doc`. Files go one per request: the canvas JSON limit is 10 MB. */
     async load(doc) {
       for (const f of Object.values(doc.files ?? {})) await call('POST', '/api/files', { files: [f] });

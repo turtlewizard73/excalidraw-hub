@@ -80,12 +80,13 @@ async function load(project, file) {
     let res;
     try { res = await api('/api/load', { project, file }); } catch (e) {
       if (e.status !== 409 || !e.data?.dirty) throw e;
-      if (!confirm('The canvas has unsaved changes. Loading replaces them. Continue?')) return;
+      const n = e.data.elementCount;
+      if (!confirm(`The canvas has unsaved changes (${n} element${n === 1 ? '' : 's'} on it). Loading replaces them.\n\nA backup copy goes to the hub's autosave folder first. Continue?`)) return;
       res = await api('/api/load', { project, file, force: true });
     }
     state.current = res.current;
     $('save-project').value = project;
-    say(`Loaded ${project}/${file} (${res.elementCount} elements)`);
+    say(`Loaded ${project}/${file} (${res.elementCount} elements)${res.autosaved ? `. The previous canvas was backed up to autosave/${res.autosaved}` : ''}`);
     render();
     await refreshStatus();
   } catch (e) { say(`Load failed: ${e.message}`, true); }
@@ -98,7 +99,7 @@ async function save(ev) {
     const res = await api('/api/save', { project, label: $('save-label').value, versioned: $('save-versioned').checked });
     state.current = res.current;
     $('save-label').value = '';
-    say(`Saved ${res.current.project}/${res.current.file}`);
+    say(`Saved ${res.current.project}/${res.current.file}${res.png ? ' and its .png' : ` (no .png: ${res.pngError})`}`, !res.png);
     await refreshList();
     await refreshStatus();
   } catch (e) { say(`Save failed: ${e.message}`, true); }

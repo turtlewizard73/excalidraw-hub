@@ -19,8 +19,10 @@ services:
       CANVAS_URL: http://canvas:3000
       CANVAS_PUBLIC_URL: http://canvas:3000
       DRAWINGS_DIR: /data
+      AUTOSAVE_DIR: /autosave
     volumes:
       - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data"
+      - "${HUB_TEST_AUTOSAVE:?set by scripts/e2e.sh}:/autosave"
     depends_on: [canvas]
   e2e:
     build:
@@ -32,8 +34,10 @@ services:
       HUB_URL: http://hub:3180
       CANVAS_URL: http://canvas:3000
       DATA_DIR: /data
+      AUTOSAVE_DIR: /autosave
       HOME: /tmp
     volumes:
       - "${HUB_TEST_DATA:?set by scripts/e2e.sh}:/data:ro"
+      - "${HUB_TEST_AUTOSAVE:?set by scripts/e2e.sh}:/autosave:ro"
       - "./test-results:/e2e/test-results"
     depends_on: [hub]

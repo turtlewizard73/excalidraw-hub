@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { createAutosave } from '../src/autosave.js';
 import { createCanvas } from '../src/canvas.js';
 import { createServer } from '../src/server.js';
 import { createStore } from '../src/store.js';
@@ -16,9 +17,17 @@ function fakeCanvas() {
     const json = body ? JSON.parse(body) : undefined;
     state.requests.push(`${req.method} ${req.url}`);
     const send = (d) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(d)); };
-    if (req.url === '/api/elements' && req.method === 'GET') return send({ success: true, elements: [...state.elements.values()] });
+    if (req.url === '/api/elements' && req.method === 'GET') {
+      const reply = send({ success: true, elements: [...state.elements.values()] });
+      state.afterGet?.(); // test hook: something changes the canvas right after a read
+      return reply;
+    }
     if (req.url === '/api/files' && req.method === 'GET') return send({ files: Object.fromEntries(state.files) });
     if (req.url === '/api/files' && req.method === 'POST') { for (const f of json.files) state.files.set(f.id, f); return send({ success: true }); }
+    if (req.url === '/api/export/image') {
+      if (state.failExport) { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, error: 'render failed' })); }
+      return send({ success: true, format: 'png', data: Buffer.from(`PNG of ${state.elements.size}`).toString('base64') });
+    }
     if (req.url === '/api/elements/batch') {
       if (state.failBatch) { res.writeHead(400, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, error: 'rejected' })); }
       if (json.replace) state.elements.clear();
@@ -30,7 +39,7 @@ function fakeCanvas() {
   return { state, server };
 }
 
-let dir, canvas, hub, base;
+let dir, autosaveDir, canvas, hub, base;
 const rect = (id, x = 0) => ({ id, type: 'rectangle', x, y: 0, width: 10, height: 10 });
 const post = (route, body, headers = {}) => fetch(base + route, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 const get = async (route) => (await fetch(base + route)).json();
@@ -38,6 +47,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-api-'));
+  autosaveDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-autosave-'));
   await fs.mkdir(path.join(dir, 'budgeting'));
   await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), JSON.stringify({ elements: [rect('a'), rect('b')], appState: { viewBackgroundColor: '#fff9db' } }));
   await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'), 'png');
@@ -48,7 +58,7 @@ beforeEach(async () => {
   const port = new URL(base).port;
   // Re-create with the Host guard on, as main.js configures it.
   await new Promise((r) => hub.close(r));
-  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
+  hub = createServer({ store: createStore(dir), canvas: createCanvas(canvasUrl), autosave: createAutosave(autosaveDir), canvasPublicUrl: 'http://localhost:3000', allowedHosts: [`127.0.0.1:${port}`] });
   await new Promise((r) => hub.listen(Number(port), '127.0.0.1', r));
 });
 afterEach(() => { canvas.server.close(); hub.close(); });
@@ -60,7 +70,7 @@ test('list → load → clean → edit → dirty → save new version → clean'
 
   const load = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   assert.equal(load.status, 200);
-  assert.deepEqual((await get('/api/status')), { current: { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' }, dirty: false, canvas: 'ok', elementCount: 2 });
+  assert.deepEqual((await get('/api/status')), { current: { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' }, dirty: false, canvas: 'ok', elementCount: 2, agentElements: 2 });
 
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
@@ -78,22 +88,112 @@ test('load over unsaved work needs force', async () => {
   canvas.state.elements.set('x', rect('x'));
   const res = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   assert.equal(res.status, 409);
-  assert.deepEqual(await res.json(), { error: 'the canvas has unsaved changes', dirty: true });
+  assert.deepEqual(await res.json(), { error: 'the canvas has unsaved changes', dirty: true, elementCount: 1 });
   assert.equal(canvas.state.elements.has('x'), true, 'canvas untouched');
-  assert.equal((await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', force: true })).status, 200);
+  const forced = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', force: true });
+  assert.equal(forced.status, 200);
   assert.deepEqual([...canvas.state.elements.keys()], ['a', 'b']);
+  // The replaced work was backed up first, expanded like a save, and the response names the backup.
+  const { autosaved } = await forced.json();
+  assert.match(autosaved, /^\d{4}-\d\d-\d\dT[\d-]+Z_unsaved\.excalidraw$/);
+  const backup = JSON.parse(await fs.readFile(path.join(autosaveDir, autosaved), 'utf8'));
+  assert.deepEqual(backup.elements.map((e) => e.id), ['x']);
+  assert.ok(backup.elements[0].seed, 'expanded');
 });
 
-test('save refuses agent shorthand and keeps files referenced only', async () => {
-  canvas.state.elements.set('s', { id: 's', type: 'rectangle', x: 0, y: 0, label: { text: 'hi' } });
-  assert.equal((await post('/api/save', { project: 'budgeting', versioned: false })).status, 409);
-  canvas.state.elements.clear();
+test('a clean load writes no backup; a backup that cannot be written stops the load', async () => {
+  const first = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
+  assert.equal(first.autosaved, null);
+  assert.deepEqual(await fs.readdir(autosaveDir), []);
+  canvas.state.elements.set('x', rect('x'));
+  await fs.rm(autosaveDir, { recursive: true });
+  await fs.writeFile(autosaveDir, 'a file where the folder should be');
+  const res = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', force: true });
+  assert.equal(res.status, 500);
+  assert.match((await res.json()).error, /could not back up the unsaved canvas, so nothing was loaded/);
+  assert.equal(canvas.state.elements.has('x'), true, 'canvas untouched');
+  assert.deepEqual((await get('/api/status')).current, first.current, 'still the loaded drawing');
+  await fs.rm(autosaveDir);
+});
+
+test('autosave keeps the newest files only', async () => {
+  const a = createAutosave(autosaveDir, 3);
+  const names = [];
+  for (let i = 0; i < 5; i++) names.push(await a.write({ elements: [] }, { project: 'p', file: 'p_v0.excalidraw' }));
+  assert.equal(new Set(names).size, 5, 'same-millisecond names stay distinct');
+  assert.equal((await fs.readdir(autosaveDir)).length, 3);
+});
+
+test('save expands agent shorthand with no tab, writes it back, and the canvas is clean right after', async () => {
+  canvas.state.elements.set('s', { id: 's', type: 'rectangle', x: 0, y: 0, width: 100, height: 40, label: { text: 'hi' } });
+  canvas.state.elements.set('t', { id: 't', type: 'rectangle', x: 300, y: 0, width: 100, height: 40 });
+  canvas.state.elements.set('a', { id: 'a', type: 'arrow', x: 100, y: 20, points: [[0, 0], [200, 0]], start: { id: 's' }, end: { id: 't' } });
+  assert.equal((await get('/api/status')).agentElements, 3);
+  const res = await post('/api/save', { project: 'agents', versioned: true });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.expanded, 3);
+  assert.equal(body.png, true);
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'agents', 'agents_v0.excalidraw'), 'utf8'));
+  const m = Object.fromEntries(saved.elements.map((e) => [e.id, e]));
+  assert.equal(m['s-label'].containerId, 's');
+  assert.equal(m['s-label'].text, 'hi');
+  assert.deepEqual(m.a.startBinding, { elementId: 's', focus: 0, gap: 8 });
+  assert.deepEqual(m.t.boundElements, [{ type: 'arrow', id: 'a' }]);
+  assert.ok(saved.elements.every((e) => !('label' in e) && !('start' in e) && !('end' in e)));
+  // Written back: the canvas holds the expanded scene, so status is clean at once and reports no agent elements.
+  assert.equal(canvas.state.elements.get('s-label').containerId, 's');
+  const s = await get('/api/status');
+  assert.equal(s.dirty, false);
+  assert.equal(s.agentElements, 0);
+  assert.equal(await fs.readFile(path.join(dir, 'agents', 'agents_v0.png'), 'utf8'), 'PNG of 4');
+});
+
+test('a write landing during the save is not wiped: the file is saved, the canvas is left alone', async () => {
+  canvas.state.elements.set('s', { id: 's', type: 'rectangle', x: 0, y: 0, width: 100, height: 40, label: { text: 'hi' } });
+  canvas.state.afterGet = () => { canvas.state.afterGet = null; canvas.state.elements.set('late', { ...rect('late'), updatedAt: 'later' }); };
+  const res = await post('/api/save', { project: 'agents', versioned: true });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.writtenBack, false);
+  assert.ok(canvas.state.elements.has('late'), 'the late element survives');
+  assert.ok('label' in canvas.state.elements.get('s'), 'canvas not replaced');
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'agents', 'agents_v0.excalidraw'), 'utf8'));
+  assert.deepEqual(saved.elements.map((e) => e.id), ['s', 's-label']);
+  assert.equal((await get('/api/status')).dirty, true, 'the late element is unsaved');
+});
+
+test('a refused save leaves the canvas as it was', async () => {
+  canvas.state.elements.set('s', { id: 's', type: 'rectangle', x: 0, y: 0, width: 100, height: 40, label: { text: 'hi' } });
+  const res = await post('/api/save', { project: 'budgeting', label: 'v0 plan', versioned: false });
+  assert.equal(res.status, 409, 'budgeting_v0_plan.excalidraw exists');
+  assert.ok('label' in canvas.state.elements.get('s'), 'not rewritten');
+  assert.equal(canvas.state.elements.has('s-label'), false);
+});
+
+test('save keeps files referenced only', async () => {
   canvas.state.elements.set('i', { id: 'i', type: 'image', fileId: 'f1', x: 0, y: 0 });
   canvas.state.files.set('f1', { id: 'f1', dataURL: 'data:1' }); canvas.state.files.set('old', { id: 'old', dataURL: 'data:2' });
   const save = await (await post('/api/save', { project: 'new-proj', versioned: true })).json();
   assert.equal(save.current.file, 'new-proj_v0.excalidraw');
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'new-proj', 'new-proj_v0.excalidraw'), 'utf8'));
   assert.deepEqual(Object.keys(saved.files), ['f1']);
+});
+
+test('png: an overwrite regenerates it; a render failure still saves the drawing', async () => {
+  await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  canvas.state.elements.set('c', rect('c', 50));
+  assert.equal((await (await post('/api/save', { project: 'budgeting', versioned: false })).json()).png, true);
+  assert.equal(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'), 'utf8'), 'PNG of 3', 'stale png replaced');
+  canvas.state.failExport = true;
+  canvas.state.elements.set('d', rect('d', 80));
+  const res = await post('/api/save', { project: 'budgeting', versioned: true });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.png, false);
+  assert.match(body.pngError, /render failed/);
+  assert.ok((await fs.readdir(path.join(dir, 'budgeting'))).includes('budgeting_v1.excalidraw'));
+  assert.equal((await fs.readdir(path.join(dir, 'budgeting'))).filter((f) => f.startsWith('.')).length, 0, 'no temp files left');
 });
 
 test('rename and delete follow the current drawing and its png', async () => {

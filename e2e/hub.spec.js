@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DATA = process.env.DATA_DIR;
+const AUTOSAVE = process.env.AUTOSAVE_DIR;
 const CANVAS = process.env.CANVAS_URL;
 const readDoc = (rel) => JSON.parse(fs.readFileSync(path.join(DATA, rel), 'utf8'));
 const exists = (rel) => fs.existsSync(path.join(DATA, rel));
@@ -92,7 +93,7 @@ test('save: writes the next version with the edit and becomes clean', async () =
   await page.getByTestId('save-project').fill('budgeting');
   await page.getByTestId('save-label').fill('E2E edit');
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved budgeting/budgeting_v2_e2e_edit.excalidraw');
+  await expect(page.getByTestId('message')).toHaveText('Saved budgeting/budgeting_v2_e2e_edit.excalidraw and its .png');
   const saved = readDoc('budgeting/budgeting_v2_e2e_edit.excalidraw');
   expect(saved.elements.length).toBe(before + 1);
   expect(saved.elements.some((e) => 'syncedAt' in e || 'createdAt' in e)).toBe(false);
@@ -108,7 +109,7 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save-versioned').check();
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw');
+  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw and its .png');
   const orig = readDoc('image-test/image-test_v0_red_png.excalidraw');
   const saved = readDoc('image-test/image-test_v1.excalidraw');
   expect(saved.files).toEqual(orig.files);
@@ -127,7 +128,7 @@ test('save with versioning off: overwrites the loaded drawing, adds no file, ref
   await drawRectangle();
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw');
+  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw and its .png');
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   expect(readDoc(file).elements.length).toBe(before + 1);
   expect(fs.readdirSync(path.join(DATA, 'image-test')).sort()).toEqual(listed);
@@ -136,6 +137,24 @@ test('save with versioning off: overwrites the loaded drawing, adds no file, ref
   await expect(page.getByTestId('message')).toContainText('already exists');
   expect(readDoc('image-test/image-test_v0_red_png.excalidraw').elements.length).toBe(3);
   await page.getByTestId('save-label').fill('');
+});
+
+test('unsaved: accepting a load backs the canvas up first and says where', async () => {
+  const onCanvas = readDoc('image-test/image-test_v1.excalidraw').elements.length + 1;
+  await drawRectangle();
+  await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
+  let message = '';
+  page.once('dialog', (d) => { message = d.message(); d.accept(); });
+  await drawing(page, 'budgeting_v0_plan.excalidraw').locator('button.open').click();
+  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v0_plan.excalidraw');
+  expect(message).toContain(`(${onCanvas} elements on it)`);
+  expect(message).toContain('autosave folder');
+  await expect(page.getByTestId('message')).toContainText('The previous canvas was backed up to autosave/');
+  const name = (await page.getByTestId('message').textContent()).split('autosave/')[1];
+  expect(name).toMatch(/_image-test_v1\.excalidraw$/);
+  const backup = JSON.parse(fs.readFileSync(path.join(AUTOSAVE, name), 'utf8'));
+  expect(backup.elements.length).toBe(onCanvas);
+  expect(backup.files).toBeTruthy();
 });
 
 test('rename: moves the file, keeps the current drawing in sync', async () => {

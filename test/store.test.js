@@ -122,3 +122,11 @@ test('overwrite replaces a file atomically, creates a missing one, and refuses n
   await assert.rejects(store.overwrite('budgeting', 'link.excalidraw', { elements: [] }), status(400));
   assert.equal(await fs.readFile(path.join(outside, 's.excalidraw'), 'utf8'), 'keep');
 });
+
+test('writePng replaces the png atomically and refuses a non-file at its name', async () => {
+  await store.writePng('ai-map', 'ai-map_v0.excalidraw', Buffer.from('new'));
+  assert.equal(await fs.readFile(path.join(dir, 'ai-map', 'ai-map_v0.png'), 'utf8'), 'new');
+  await fs.mkdir(path.join(dir, 'ai-map', 'board-before-clear.png'));
+  await assert.rejects(store.writePng('ai-map', 'board-before-clear.excalidraw', Buffer.from('x')), status(409));
+  assert.deepEqual((await ls('ai-map')).filter((f) => f.startsWith('.')), [], 'no temp files left');
+});

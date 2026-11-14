@@ -12,11 +12,11 @@ cp .env.example .env    # once; sets UID/GID so saved drawings are owned by you
 docker compose up -d --build
 # open http://localhost:3080
 ```
-The hub mounts parent repo's `docs/drawings` (override with `HUB_DRAWINGS`). Loading a drawing replaces whatever is on the shared canvas, after a confirm if it has unsaved changes.
+The hub mounts parent repo's `docs/drawings` (override with `HUB_DRAWINGS`) and `./autosave` for backups taken before a forced load (override with `HUB_AUTOSAVE`). Loading a drawing replaces whatever is on the shared canvas, after a confirm if it has unsaved changes.
 
 ## Test
 ```bash
 docker run --rm -v "$PWD:/app:ro" -w /app node:20-slim node --test test/   # unit + API
 scripts/e2e.sh                                                            # isolated canvas :3100 + hub :3180 + Playwright
 ```
-`scripts/e2e.sh` copies `fixtures/` to a temp folder. It never touches port 3000 or `docs/drawings`.
+`scripts/e2e.sh` copies `fixtures/` to a temp folder and uses a temp autosave folder. It never touches port 3000 or `docs/drawings`.

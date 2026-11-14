@@ -46,7 +46,7 @@ Changed 2026-11-05 at the user's request. The first version always wrote a new v
   - The file changed on disk since load or save (mtime + size), e.g. `git pull` or an agent's export.
 - A load forgets the baseline before touching the canvas. If it fails or times out, the canvas may hold anything, so the next save must not treat it as the old drawing.
 - **No confirm on overwrite.** Save on a loaded file is what the button says. Committed states stay in git; uncommitted ones are gone.
-- **Known limits:** overwriting leaves a same-named `.png` stale and resets the file's mode to the default. A second tab showing an older drawing can overwrite the drawing loaded from the first tab until its 2 s poll catches up (accepted: narrow window, and the status poll shows the current file).
+- **Known limits:** overwriting resets the file's mode to the default. A second tab showing an older drawing can overwrite the drawing loaded from the first tab until its 2 s poll catches up (accepted: narrow window, and the status poll shows the current file).
 - The API requires the `versioned` flag and answers 400 without it. Based on: a tab opened before this change shows "Save new version" and sends no flag; defaulting to off would make that click overwrite.
 - The checkbox is not remembered between page loads. Based on: "default off".
 - Saving into a new project name creates the folder.
@@ -68,8 +68,35 @@ Changed 2026-11-05 at the user's request. The first version always wrote a new v
 - The page polls status every 2 s, shows "unsaved changes", asks before loading over unsaved work (load wipes the shared canvas), and sets a `beforeunload` warning.
 - A canvas with elements but no load/save in this hub session counts as unsaved.
 
-### Agent-shorthand guard
-- Elements the agent creates with no tab open are stored in shorthand (`label`, `start`, `end`). Save refuses with a 409 if any are present, asking to retry once the canvas tab has synced. With the hub page open, the iframe converts them within about 1.2 s. Based on: canvas `CreateElementSchema` and frontend sync code.
+### Agent-format elements are expanded on save
+Changed 2026-11-14 (plan `docs/plans/2026-11-14-hub-errors.md`). The first version refused to save while shorthand was present and waited for a browser tab to convert it. With no tab open that wait never ended, so agents could not save on their own (E1).
+- **Agent format:** what the canvas stores for elements no tab has seen yet. Either MCP shorthand (`label: {text}` on shapes and arrows, `start`/`end: {id}` on arrows), or a skeletal element with no `seed` (no defaults filled in).
+- **Save expands them on the server** (`src/agent.js`), the way an open tab would. Based on the tab probe `probe/2026-11-14-tab-conversion.mjs`:
+  - `label` becomes a bound text element `<id>-label` (fontSize 20, fontFamily 5, centred on the shape or the arrow's middle point), size estimated at 0.5 × fontSize per character and 1.25 × fontSize per line. A container that already has a bound text gets its text replaced instead.
+  - `start`/`end` become `startBinding`/`endBinding` (`focus: 0`, `gap: 8`) plus `boundElements` back-references. A binding to a missing element is dropped.
+  - Missing defaults are filled in, never overwritten (`roundness: null`, random `seed`, 100 × 100 for a shape with no size, …). `text` on a shape is dropped, as the tab drops it. `start: null` leaves an existing binding alone.
+  - Array order (z-order) is kept and new label texts go last. Agent elements and labels without an `index` get keys after the current highest one. Nothing is renumbered, and complete elements without an index are left to the tab.
+  - Complete elements are untouched, except a shape gaining an arrow back-reference or a bound text getting new label text. Those get `version + 1`, a new `versionNonce` and `updated`, so a connected tab does not keep its older copy.
+- **Not the canvas's own `expandElementsForExport`.** It rewrites every element: `null` roundness becomes rounded and every `index` is renumbered (see "Load and save use the raw canvas API").
+- **The file is written first, then the expanded scene goes back to the canvas** (`batch replace`), and the baseline is taken from the re-read canvas. Otherwise status reports unsaved right after the save, and a tab opened later would convert the shorthand again with its own measurements.
+  - A refused save (existing name, overwrite guards) therefore leaves the canvas untouched.
+  - The write-back happens only if the canvas is unchanged since the save read it (ids, `updatedAt`, `version`). A replace wipes everything not in it, so an element an agent added in between would be lost. If the canvas moved on, it stays as it is and status shows it as unsaved. The response says `writtenBack: true|false`. Based on: independent review, 2026-11-14.
+  - **Residual risk:** a write landing between that re-check and the replace (two back-to-back requests) is still lost. Accepted: the canvas has no compare-and-swap.
+- **Expansion runs even with a tab connected.** A tab converts on its next change only, and a hidden tab may be throttled, so waiting for it can block again. A race with a converting tab is benign: both name labels `<id>-label`, so the worst case is a later "unsaved" flag, not duplicates.
+- `/api/status` reports `agentElements`, the count of agent-format elements on the canvas.
+- **Known limit:** estimated label sizes are approximate until a tab re-measures the text.
+
+### Forced load backs up the canvas first
+Added 2026-11-14 (E3: 70 unsaved agent elements were lost after the generic confirm).
+- Before a forced load over a dirty canvas, the hub writes the canvas (expanded, as a save would) to `AUTOSAVE_DIR` as `<timestamp>_<current drawing or "unsaved">.excalidraw`. It keeps the newest 50. If the backup cannot be written, the load is refused and the canvas is untouched.
+- If the load itself then fails, its error names the backup file.
+- The 409 for a dirty load carries the canvas element count, and the confirm names it and the backup folder. The load response names the backup file and the page shows it.
+- Compose mounts `./autosave` (gitignored) at `/autosave`. Based on: backups must not go into the git-tracked `docs/drawings`, and the hub must work when cloned alone.
+
+### PNG on save
+Added 2026-11-14 (E4).
+- After every save the hub asks the canvas to render the scene (`POST /api/export/image`, headless node renderer, no tab needed) and writes `<base>.png` next to the drawing atomically. An overwrite regenerates it, so the PNG is no longer stale.
+- Best-effort: if rendering fails, the save still succeeds and reports `pngError`.
 
 ### Server: Node 20 built-ins, no framework
 - About six JSON routes plus static files. `node:http` and `node:test` cover this with zero dependencies, no lockfile and no install step. Based on: SMORES Simple; "build your own only when clearly cheaper": a router this size is ~40 lines, cheaper than adding and pinning express.

@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXT, MAX_NAME, isSafeName, isUsableLabel, nextVersion, plainSaveTarget, saveName } from './names.js';
-import { Baseline, buildDocument, hasShorthand, missingFiles } from './scene.js';
+import { expandAgentElements, isAgentFormat } from './agent.js';
+import { Baseline, buildDocument, missingFiles } from './scene.js';
 import { StoreError } from './store.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -21,10 +22,11 @@ async function readJson(req) {
 }
 
 /**
- * @param {{store, canvas, canvasPublicUrl: string, allowedHosts: string[]}} deps
+ * @param {{store, canvas, autosave, canvasPublicUrl: string, allowedHosts: string[]}} deps
  * allowedHosts: Host header values accepted (DNS-rebinding guard), e.g. ['127.0.0.1:3080', 'localhost:3080'].
+ * autosave: where a forced load backs up unsaved work first (src/autosave.js).
  */
-export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
+export function createServer({ store, canvas, autosave, canvasPublicUrl, allowedHosts }) {
   const baseline = new Baseline();
   // One state-changing request at a time: load/save/rename/delete share the baseline and the canvas.
   let queue = Promise.resolve();
@@ -36,6 +38,9 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     'content-security-policy': `default-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
   };
   const same = (a, b) => a && b && a.project === b.project && a.file === b.file;
+  const liveCount = (elements) => elements.filter((e) => !e.isDeleted).length;
+  // Identifies a canvas state: every element's id and last server-side change.
+  const fingerprint = (elements) => elements.map((e) => `${e.id}@${e.updatedAt ?? ''}@${e.version ?? ''}`).sort().join('|');
 
   const routes = {
     'GET /api/config': async () => ({ canvasUrl: canvasPublicUrl }),
@@ -44,7 +49,10 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     'GET /api/status': async () => {
       try {
         const elements = await canvas.elements();
-        return { current: baseline.current, dirty: baseline.isDirty(elements), canvas: 'ok', elementCount: elements.filter((e) => !e.isDeleted).length };
+        return {
+          current: baseline.current, dirty: baseline.isDirty(elements), canvas: 'ok',
+          elementCount: liveCount(elements), agentElements: elements.filter(isAgentFormat).length,
+        };
       } catch (e) {
         return { current: baseline.current, dirty: null, canvas: 'unreachable', error: e.message };
       }
@@ -53,13 +61,26 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
     'POST /api/load': serial(async ({ project, file, force }) => {
       const stamp = await store.stamp(project, file); // before reading: a change in between then counts as a change
       const doc = await store.read(project, file);
-      if (!force && baseline.isDirty(await canvas.elements())) throw new HttpError(409, 'the canvas has unsaved changes', { dirty: true });
+      const elements = await canvas.elements();
+      const dirty = baseline.isDirty(elements);
+      if (dirty && !force) throw new HttpError(409, 'the canvas has unsaved changes', { dirty: true, elementCount: liveCount(elements) });
+      // Unsaved work is backed up before it is replaced. No backup, no load.
+      let autosaved = null;
+      if (dirty) {
+        const backup = buildDocument(expandAgentElements(elements).elements, await canvas.files(), baseline.appState);
+        try { autosaved = await autosave.write(backup, baseline.current); } catch (e) {
+          throw new HttpError(500, `could not back up the unsaved canvas, so nothing was loaded: ${e.message}`);
+        }
+      }
       // If the load fails, the canvas may hold anything: forget the old drawing so no save can overwrite it.
       baseline.forget();
-      await canvas.load(doc);
+      try { await canvas.load(doc); } catch (e) {
+        if (autosaved) e.message += ` (the previous canvas was backed up to autosave/${autosaved})`;
+        throw e;
+      }
       baseline.set({ project, file }, doc.elements, doc.appState);
       baseline.stamp = stamp;
-      return { current: baseline.current, elementCount: doc.elements.filter((e) => !e.isDeleted).length };
+      return { current: baseline.current, elementCount: liveCount(doc.elements), autosaved };
     }),
 
     'POST /api/save': serial(async ({ project, label, versioned }) => {
@@ -69,13 +90,32 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
       // Required: a page loaded before this flag existed says "Save new version" and must not overwrite.
       if (typeof versioned !== 'boolean') throw new HttpError(400, 'this page is out of date; reload it and save again');
-      const [elements, files] = await Promise.all([canvas.elements(), canvas.files()]);
-      if (hasShorthand(elements)) throw new HttpError(409, 'the canvas has not synced from a browser tab yet; wait a second and retry');
+      const [read, files] = await Promise.all([canvas.elements(), canvas.files()]);
+      // Agent-format elements are expanded in memory; the file gets the expanded scene.
+      const expanded = expandAgentElements(read);
+      const elements = expanded.elements;
       const doc = buildDocument(elements, files, baseline.appState);
       const saved = async (file) => {
-        baseline.set({ project, file }, doc.elements, doc.appState, elements);
+        // After the file is safe, put the expanded scene on the canvas too, so it matches the file. Only if the
+        // canvas is unchanged since it was read: a replace would wipe anything added in between.
+        let canvasNow = elements;
+        let writtenBack = false;
+        if (expanded.changed) {
+          const now = await canvas.elements();
+          if (fingerprint(now) === fingerprint(read)) {
+            await canvas.load({ elements });
+            canvasNow = await canvas.elements();
+            writtenBack = true;
+          } else {
+            canvasNow = now; // the canvas moved on: it stays as it is and status shows it as unsaved
+          }
+        }
+        baseline.set({ project, file }, doc.elements, doc.appState, canvasNow);
         baseline.stamp = await store.stamp(project, file);
-        return { current: baseline.current, elementCount: doc.elements.length };
+        const result = { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack };
+        // The PNG is a convenience: the drawing is already saved if rendering fails.
+        try { await store.writePng(project, file, await canvas.exportPng()); result.png = true; } catch (e) { result.png = false; result.pngError = e.message; }
+        return result;
       };
       if (!versioned) {
         if (!isUsableLabel(label)) throw new HttpError(400, 'the label needs a letter or digit (a-z, 0-9) to use in the file name');
@@ -159,7 +199,8 @@ export function createServer({ store, canvas, canvasPublicUrl, allowedHosts }) {
       if (status === 500) console.error(e);
       if (res.headersSent) return res.end();
       res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: status === 500 ? 'internal error' : e.message, ...(e.extra ?? {}) }));
+      const hidden = status === 500 && !(e instanceof HttpError);
+      res.end(JSON.stringify({ error: hidden ? 'internal error' : e.message, ...(e.extra ?? {}) }));
     });
   });
 }
