@@ -1,4 +1,4 @@
-# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here (deployed copy: parent repo's sandbox/excalidraw-hub).
+# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here (deployed copy: parent repo's projects/excalidraw-hub, a submodule).
 # Hub http://localhost:3080, canvas http://localhost:3000 (the agent's Excalidraw MCP talks to :3000). See docs/setup.md.
 services:
   canvas:
