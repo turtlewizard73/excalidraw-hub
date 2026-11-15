@@ -11,10 +11,11 @@ flowchart LR
   A[agent MCP] --> C
   H -->|load / read scene| C
   H -->|list, write, rename, delete| D[(docs/drawings)]
+  C -->|PlantUML / Salt code blocks| P[plantuml-server]
 ```
 
 ## Run
-Start parent repo's canvas first (`docker compose up -d` at the parent repo root). Then, in this folder:
+The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one compose starts everything. If parent repo's old stock canvas still runs on :3000, stop it first. In this folder:
 
 ```bash
 cp .env.example .env          # once: saved files get your UID/GID
@@ -30,7 +31,7 @@ The drawings folder must hold at least one entry, such as a project folder. If i
 - **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder. Every save also writes `<name>.png` next to the drawing.
 - **Save new version:** writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
 - **Revert:** every overwrite first keeps the old file in `backups/` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first, and the file it replaces is kept too.
-- **Sync (⟳ on a project):** commits that project's folder in parent repo's git repo as "`<project> <names> diagram update`", only that folder. On `dev` it also pushes, and only the drawings: other unpushed commits on `dev` stay local (then run `git pull --rebase` before pushing `dev` yourself; the message says so). On any other branch it asks, then commits without pushing.
+- **Sync (⟳ on a project):** commits that project's folder in parent repo's git repo as "`<project> <names> diagram update`", only that folder. On `development` (`SYNC_BRANCH`) it also pushes, and only the drawings: other unpushed commits on `development` stay local (then run `git pull --rebase` before pushing it yourself; the message says so). On any other branch it asks, then commits without pushing.
 - **Rename / delete:** hover a drawing and use ✎ or 🗑. The `.png` with the same name moves or goes with it. Delete asks first.
 - **Agents:** an agent can save with `POST /api/save` without any browser tab open. Elements it drew in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save, and the canvas is updated to match. `GET /api/status` shows how many such elements are waiting (`agentElements`).
 - **Unsaved badge:** "● Unsaved changes" after a real edit, "Saved" after a load or save. Leaving the page with unsaved changes shows the browser's warning.
@@ -47,6 +48,7 @@ scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git 
 ## Layout
 | Path | What it is |
 |---|---|
+| `canvas/` | The canvas on :3000: git subtree of a [yctimlin/mcp_excalidraw](https://github.com/yctimlin/mcp_excalidraw) 2.1.2 fork, plus code blocks (paste Mermaid / PlantUML / Salt, hover to toggle code and diagram). Design: `canvas/docs/specs/2026-11-14-code-block.md` |
 | `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `backups.js` (copies for Revert), `git.js` (sync), `canvas.js` (canvas client), `server.js` (HTTP API) |
 | `backups/` | Copies of overwritten drawings, for Revert (gitignored) |
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |

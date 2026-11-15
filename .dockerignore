@@ -1,0 +1,9 @@
+# Hub image needs only src/ and public/. The canvas has its own build (compose service canvas).
+canvas/
+node_modules/
+e2e/
+test-results/
+backups/
+autosave/
+fixtures/
+.git

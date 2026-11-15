@@ -4,9 +4,18 @@
 name: excalidraw-hub-test
 services:
   canvas:
-    image: ghcr.io/yctimlin/mcp_excalidraw-canvas:2.1.2
+    build:
+      context: ./canvas
+      dockerfile: Dockerfile.canvas
     ports:
       - "127.0.0.1:3100:3000"
+    environment:
+      PLANTUML_URL: http://plantuml:8080
+    depends_on: [plantuml]
+  plantuml:
+    image: plantuml/plantuml-server:jetty@sha256:3719f4a9b0b061f1aa42d14d130388f831954ca65685d521b6c5b72301e993e6
+    environment:
+      PLANTUML_SECURITY_PROFILE: SANDBOX
   hub:
     build: .
     ports:

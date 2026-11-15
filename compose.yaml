@@ -1,30 +1,45 @@
-# Excalidraw hub. Start: `docker compose up -d` here, with parent repo's canvas already up (`docker compose up -d` at the parent repo root).
-# Open http://localhost:3080. See docs/setup.md.
+# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here (deployed copy: parent repo's sandbox/excalidraw-hub).
+# Hub http://localhost:3080, canvas http://localhost:3000 (the agent's Excalidraw MCP talks to :3000). See docs/setup.md.
 services:
+  canvas:
+    # Fork of yctimlin/mcp_excalidraw (git subtree in canvas/): stock canvas + code blocks (Mermaid, PlantUML, Salt).
+    # In-memory scene: a restart empties it; drawings live in parent repo's docs/drawings.
+    build:
+      context: ./canvas
+      dockerfile: Dockerfile.canvas
+    ports:
+      - "127.0.0.1:3000:3000"   # fixed: parent repo's .claude/mcp/excalidraw.sh connects here
+    environment:
+      PLANTUML_URL: http://plantuml:8080   # code blocks: PlantUML/Salt renders via the canvas server
+    depends_on: [plantuml]
+    restart: unless-stopped
+  plantuml:
+    # Local renderer for PlantUML and Salt; diagram text never leaves the machine. No host port.
+    image: plantuml/plantuml-server:jetty@sha256:3719f4a9b0b061f1aa42d14d130388f831954ca65685d521b6c5b72301e993e6   # pinned 2026-11-14 (built 2026-11-11)
+    environment:
+      PLANTUML_SECURITY_PROFILE: SANDBOX   # no file or URL includes; stdlib (C4, sprites) still works (probed 2026-11-14)
+    restart: unless-stopped
   hub:
     build: .
     ports:
       - "127.0.0.1:${HUB_PORT:-3080}:${HUB_PORT:-3080}"   # host loopback only
-    # The canvas is published on the host's 127.0.0.1:3000; host-gateway reaches it from the container
-    # (Docker Desktop and Linux engines alike; network_mode: host does not reach WSL under Docker Desktop).
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     # Host user, so saved drawings are not root-owned in the repo (.env sets UID/GID; bash does not export them).
     user: "${UID:-1000}:${GID:-1000}"
     environment:
       HUB_HOST: 0.0.0.0
       HUB_PORT: "${HUB_PORT:-3080}"
-      CANVAS_URL: "${CANVAS_URL:-http://host.docker.internal:3000}"     # server -> canvas REST
+      CANVAS_URL: "${CANVAS_URL:-http://canvas:3000}"                   # server -> canvas REST (compose network)
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
       HOME: /home/node
       REPO_DIR: /repo                          # parent repo's git repo, for the per-project sync button
       DRAWINGS_DIR: /repo/docs/drawings
       BACKUPS_DIR: /backups
-      SYNC_BRANCH: "${SYNC_BRANCH:-dev}"       # sync pushes only from this branch
+      SYNC_BRANCH: "${SYNC_BRANCH:-development}"   # sync pushes only from this branch
     volumes:
       - "${HUB_REPO:-../..}:/repo"
       - "${HUB_BACKUPS:-./backups}:/backups"   # copies of overwritten drawings, for Revert
       # Your git identity and SSH key, so sync commits as you and can push (key must have no passphrase).
       - "${HOME}/.gitconfig:/home/node/.gitconfig:ro"
       - "${HOME}/.ssh:/home/node/.ssh:ro"
+    depends_on: [canvas]
     restart: unless-stopped

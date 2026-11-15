@@ -20,7 +20,7 @@ const repo = process.env.REPO_DIR ? path.resolve(process.env.REPO_DIR) : null;
 if (repo) {
   const rel = path.relative(repo, drawings);
   if (rel.startsWith('..') || path.isAbsolute(rel)) console.error(`git sync off: ${drawings} is not inside REPO_DIR ${repo}`);
-  else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'dev' });
+  else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'development' });
 }
 
 // Exit so the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race").
