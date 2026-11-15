@@ -33,5 +33,5 @@ Code-block browser tests (they clear their canvas, so only against the test stac
 
 ## Canvas (`canvas/`)
 - A git subtree, not a submodule: no GitHub fork needed, and the files are plain files in this repo.
-- Origin of the code: `sandbox/excalidraw-codeblock/canvas` in parent repo (upstream clone at v2.1.2, branch `feat/code-block-build`).
+- Origin of the code: a local clone of yctimlin/mcp_excalidraw at v2.1.2, branch `feat/code-block-build`, vendored here as a subtree. That playground (parent repo `sandbox/excalidraw-codeblock`) was deleted 2026-11-15; `canvas/` is now the only copy.
 - Upgrade to a new upstream release: `git subtree pull --prefix=canvas https://github.com/yctimlin/mcp_excalidraw.git <tag> --squash`, resolve conflicts in `canvas/frontend/src/App.tsx` and `canvas/src/server.ts`, then bump the MCP image tag in parent repo's `.claude/mcp/excalidraw.sh` to the same version.
