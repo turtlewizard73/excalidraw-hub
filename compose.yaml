@@ -12,6 +12,12 @@ services:
     environment:
       PLANTUML_URL: http://plantuml:8080   # code blocks: PlantUML/Salt renders via the canvas server
     depends_on: [plantuml]
+    healthcheck:   # the image has no curl/wget; node is there
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
   plantuml:
     # Local renderer for PlantUML and Salt; diagram text never leaves the machine. No host port.
@@ -41,5 +47,7 @@ services:
       # Your git identity and SSH key, so sync commits as you and can push (key must have no passphrase).
       - "${HOME}/.gitconfig:/home/node/.gitconfig:ro"
       - "${HOME}/.ssh:/home/node/.ssh:ro"
-    depends_on: [canvas]
+    depends_on:
+      canvas:
+        condition: service_healthy   # the hub reads the canvas at start
     restart: unless-stopped
