@@ -47,7 +47,7 @@ scripts/native.sh status      # or: stop, restart
 ```
 PlantUML/Salt code blocks need `PLANTUML_URL` set to a renderer, such as a plantuml-server or Kroki ([docs/setup.md](docs/setup.md#diagram-renderers)). Mermaid works without it. It does not start at boot.
 
-Open http://localhost:3080. With no settings the drawings go to `drawings/` here and the ⟳ sync button is off.
+With no settings the drawings go to `drawings/` here and the ⟳ sync button is off. Under Docker the hub runs as UID/GID 1000 unless `.env` says otherwise, so if your user is not 1000, do the `cp .env.example .env` step (and set `UID`/`GID`) first.
 
 ## Configure
 Point the hub at a repo of yours in `.env` (or the shell, which wins):
@@ -56,7 +56,7 @@ HUB_REPO=/home/me/my-repo          # folder holding the drawings; ⟳ sync is on
 HUB_DRAWINGS_SUBDIR=docs/drawings  # drawings folder inside it (default: HUB_REPO itself)
 SYNC_BRANCH=main                   # the only branch ⟳ pushes from (default main)
 ```
-A repo that embeds the hub (e.g. as a submodule) can keep these in a small wrapper script that exports them and then runs `docker compose` or `scripts/native.sh` in this folder.
+A repo that embeds the hub (e.g. as a submodule) can keep these in a small wrapper script that writes them into this folder's `.env` (gitignored) and then runs `docker compose` or `scripts/native.sh` here.
 
 Open http://localhost:3080. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md). Both ways read the same `.env`.
 
