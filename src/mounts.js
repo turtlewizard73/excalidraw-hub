@@ -7,5 +7,5 @@ import fs from 'node:fs/promises';
 export async function checkDrawingsDir(dir) {
   let entries;
   try { entries = await fs.readdir(dir); } catch (e) { return `cannot read drawings folder ${dir}: ${e.code ?? e.message}`; }
-  return entries.length ? null : `drawings folder ${dir} is empty (bind mount not connected yet?)`;
+  return entries.length ? null : `drawings folder ${dir} is empty (under Docker: bind mount not connected yet?)`;
 }

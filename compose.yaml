@@ -10,8 +10,13 @@ services:
     ports:
       - "127.0.0.1:3000:3000"   # fixed: parent repo's .claude/mcp/excalidraw.sh connects here
     environment:
-      PLANTUML_URL: http://plantuml:8080   # code blocks: PlantUML/Salt renders via the canvas server
-    depends_on: [plantuml]
+      # Code blocks: PlantUML/Salt render via the canvas server. Set PLANTUML_URL in .env to use an existing
+      # renderer (e.g. https://kroki.io/plantuml) and the plantuml container is not started. Mermaid renders in the browser.
+      PLANTUML_URL: "${PLANTUML_URL:-http://plantuml:8080}"
+    depends_on:
+      plantuml:
+        condition: service_started
+        required: false   # absent when PLANTUML_URL is set
     healthcheck:   # the image has no curl/wget; node is there
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 10s
@@ -21,6 +26,8 @@ services:
     restart: unless-stopped
   plantuml:
     # Local renderer for PlantUML and Salt; diagram text never leaves the machine. No host port.
+    # Runs only while PLANTUML_URL is unset: then its profile is "", which compose starts by default.
+    profiles: ["${PLANTUML_URL:+external-renderer}"]
     image: plantuml/plantuml-server:jetty@sha256:3719f4a9b0b061f1aa42d14d130388f831954ca65685d521b6c5b72301e993e6   # pinned 2026-11-14 (built 2026-11-11)
     environment:
       PLANTUML_SECURITY_PROFILE: SANDBOX   # no file or URL includes; stdlib (C4, sprites) still works (probed 2026-11-14)

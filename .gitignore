@@ -6,3 +6,4 @@ test-results/
 backups/*
 !backups/.gitkeep
 autosave/
+.native/

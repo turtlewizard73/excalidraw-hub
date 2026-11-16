@@ -23,9 +23,10 @@ if (repo) {
   else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'development' });
 }
 
-// Exit so the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race").
+// Exit: under Docker the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race");
+// scripts/native.sh shows this message and stops.
 const notReady = await checkDrawingsDir(drawings);
-if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting so Docker restarts it`); process.exit(1); }
+if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it; scripts/native.sh stops)`); process.exit(1); }
 
 const server = createServer({
   store: createStore(drawings),

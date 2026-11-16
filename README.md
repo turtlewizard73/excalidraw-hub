@@ -11,7 +11,7 @@ flowchart LR
   A[agent MCP] --> C
   H -->|load / read scene| C
   H -->|list, write, rename, delete| D[(docs/drawings)]
-  C -->|PlantUML / Salt code blocks| P[plantuml-server]
+  C -->|PlantUML / Salt code blocks| P["plantuml-server (or PLANTUML_URL)"]
 ```
 
 ## What it looks like
@@ -30,16 +30,26 @@ Made-up demo data, regenerated with `scripts/screenshots.sh`.
 *Hover a code block to switch between diagram and source, or edit it.*
 
 ## Run
-The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one compose starts everything. If parent repo's old stock canvas still runs on :3000, stop it first. In this folder:
+The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one command starts everything. Pick one way. Both use :3000 and :3080, so run only one at a time. If parent repo's old stock canvas still runs on :3000, stop it first. In this folder:
 
+**Docker** (starts at boot, restarts on crash, includes the PlantUML renderer unless `PLANTUML_URL` is set):
 ```bash
 cp .env.example .env          # once: saved files get your UID/GID
 docker compose up -d --build
 ```
+Stop it with `docker compose down`.
 
-Open http://localhost:3080. Stop it with `docker compose down`. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md).
+**Without Docker** (needs Node.js 20+ and git):
+```bash
+scripts/native.sh install     # once, and after canvas/ changes: npm ci + build of the canvas
+scripts/native.sh start       # canvas :3000 + hub :3080 in the background; logs in .native/
+scripts/native.sh status      # or: stop, restart
+```
+PlantUML/Salt code blocks need `PLANTUML_URL` set to a renderer, such as a plantuml-server or Kroki ([docs/setup.md](docs/setup.md#diagram-renderers)). Mermaid works without it. It does not start at boot.
 
-The drawings folder must hold at least one entry, such as a project folder. If it is empty, the hub exits and Docker keeps retrying it. That is how it waits out Docker Desktop connecting the folder after a boot.
+Open http://localhost:3080. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md). Both ways read the same `.env`.
+
+The drawings folder must hold at least one entry, such as a project folder. If it is empty, the hub exits: Docker keeps retrying it (that is how it waits out Docker Desktop connecting the folder after a boot), and `native.sh start` shows why and stops.
 
 ## Use
 - **Load:** click a drawing in the sidebar. It replaces what is on the shared canvas. Unsaved changes are saved first, without asking: into the loaded drawing, or as `tmp/tmp_v<n>` when nothing was loaded. If that save is refused, a popup says why and nothing is loaded.
@@ -59,6 +69,7 @@ docker build -t excalidraw-hub-unit . && docker run --rm -u 1000:1000 -e HOME=/t
 scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git repo
 scripts/screenshots.sh   # regenerates the README images in docs/images/ (same isolated stack, made-up drawings)
 ```
+Without Docker: `npm test`, and `E2E_RUNTIME=native scripts/e2e.sh` (after `scripts/native.sh install` and `npm ci` in `e2e/`. Playwright needs a Chromium: `npx playwright install chromium` in `e2e/`, or `CHROMIUM_PATH=<path to chrome>`).
 `scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a throwaway git repo holding a copy of `fixtures/`, with a bare repo as its origin. It never touches port 3000, the real drawings or parent repo's git.
 
 ## Layout
@@ -67,6 +78,7 @@ scripts/screenshots.sh   # regenerates the README images in docs/images/ (same i
 | `canvas/` | The canvas on :3000: git subtree of a [yctimlin/mcp_excalidraw](https://github.com/yctimlin/mcp_excalidraw) 2.1.2 fork, plus code blocks (paste Mermaid / PlantUML / Salt, hover to toggle code and diagram). Design: `canvas/docs/specs/2026-11-14-code-block.md` |
 | `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `backups.js` (copies for Revert), `git.js` (sync), `canvas.js` (canvas client), `server.js` (HTTP API) |
 | `backups/` | Copies of overwritten drawings, for Revert (gitignored) |
+| `scripts/` | `native.sh` (run without Docker), `e2e.sh` (browser tests, Docker or native), `screenshots.sh` |
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |
 | `test/`, `e2e/` | Unit/API tests (`node --test`) and Playwright browser tests |
 | `docs/images/` | README screenshots, made by `scripts/screenshots.sh` from `e2e/readme.shots.js` |

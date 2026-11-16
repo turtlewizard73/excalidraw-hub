@@ -886,7 +886,7 @@ app.post('/api/elements/sync', (req: Request, res: Response) => {
 });
 
 // ─── PlantUML / Salt render proxy (code blocks) ───────────────
-// The browser posts diagram text; a local plantuml-server (PLANTUML_URL) renders it to SVG.
+// The browser posts diagram text; PLANTUML_URL (local plantuml-server, or any `POST <base>/svg` renderer such as Kroki) renders it to SVG.
 // Same-origin proxy: no CORS, and the renderer needs no host port. Unset PLANTUML_URL = 503.
 const PLANTUML_URL = process.env.PLANTUML_URL?.replace(/\/+$/, '');
 app.post('/api/render/plantuml', express.text({ type: '*/*', limit: '256kb' }), async (req: Request, res: Response) => {
@@ -915,7 +915,9 @@ app.post('/api/render/plantuml', express.text({ type: '*/*', limit: '256kb' }), 
     if ((upstream.headers.get('content-type') ?? '').includes('svg')) {
       return res.status(200).type('image/svg+xml').set('X-PlantUML-Status', String(upstream.status)).send(body);
     }
-    return res.status(502).json({ success: false, error: `PlantUML server answered HTTP ${upstream.status}` });
+    // Kroki answers syntax errors as text/plain: pass its message on so the code block can show it.
+    const detail = body.trim().slice(0, 500);
+    return res.status(502).json({ success: false, error: `PlantUML server answered HTTP ${upstream.status}${detail ? `: ${detail}` : ''}` });
   } catch (error) {
     logger.warn(`PlantUML render failed: ${(error as Error).message}`);
     return res.status(502).json({ success: false, error: `PlantUML server unreachable: ${(error as Error).message}` });
