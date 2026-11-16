@@ -1,4 +1,4 @@
-// Pure naming rules for docs/drawings: <project>/<project>_v<i>[_<label>].excalidraw (parent repo CLAUDE.md, Drawings).
+// Pure naming rules for the drawings folder: <project>/<project>_v<i>[_<label>].excalidraw (README, "Naming").
 export const EXT = '.excalidraw';
 export const MAX_NAME = 121;
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;

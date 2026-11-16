@@ -1,4 +1,4 @@
-// Copies of drawings taken before they are overwritten, for Revert. Outside docs/drawings (git-tracked).
+// Copies of drawings taken before they are overwritten, for Revert. Outside the drawings folder, which may be git-tracked.
 // Layout: <root>/<project>/<base>/<timestamp>.excalidraw. Folders starting with "_" hold copies Revert never reads:
 // _reverted (the file a revert replaced) and _retired (backups of deleted drawings, or of a name created anew).
 import fs from 'node:fs/promises';

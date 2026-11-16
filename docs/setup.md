@@ -6,7 +6,7 @@ Two ways to run it, one at a time (both bind :3000 and :3080): Docker (below) or
 
 ## Needs
 - Docker with Compose 2.20 or later (`depends_on.required`; renderer switch verified on v5.6.1), in WSL. No Node in WSL for this way.
-- Nothing else: this compose builds and runs the canvas (`canvas/`, git subtree of a yctimlin/mcp_excalidraw 2.1.2 fork with code blocks) on `127.0.0.1:3000` and a pinned `plantuml/plantuml-server` (no host port; skipped when `PLANTUML_URL` is set, see Diagram renderers). parent repo's `.claude/mcp/excalidraw.sh` must use the matching MCP image tag (2.1.2).
+- Nothing else: this compose builds and runs the canvas (`canvas/`, git subtree of a yctimlin/mcp_excalidraw 2.1.2 fork with code blocks) on `127.0.0.1:3000` and a pinned `plantuml/plantuml-server` (no host port; skipped when `PLANTUML_URL` is set, see Diagram renderers). An agent's Excalidraw MCP that talks to this canvas should use the matching MCP version (2.1.2).
 
 ## Run
 ```bash
@@ -15,11 +15,11 @@ docker compose up -d --build
 # open http://localhost:3080
 ```
 The hub mounts:
-- parent repo's root at `/repo` (override with `HUB_REPO`); drawings are its `docs/drawings`. Read-write, for saving and for the sync button's `git add/commit/push`.
+- `HUB_REPO` at `/repo` (default `./drawings`, gitignored); the drawings folder is `HUB_DRAWINGS_SUBDIR` inside it (default `.`). Read-write, for saving and, when `HUB_REPO` is the top of a git repo, for the sync button's `git add/commit/push`. Otherwise sync is off and the hub log says why.
 - `./backups` for Revert (override with `HUB_BACKUPS`).
 - `./workspace` at `/workspace` (override with `HUB_WORKSPACE`): `workspace.json`, the folders attached with "+ Add folder".
-- `HUB_FOLDERS_ROOT` (default `$HOME`) read-write at the same path inside the container, so attached folders (for example another repo's `docs/drawings`) can be read and saved, and the paths in `workspace.json` work for both runtimes. Only folders inside it can be attached. Set it narrower (e.g. `HUB_FOLDERS_ROOT=/home/me/repos`) to limit what the container can write. parent repo's own folder is `/repo/docs/drawings` inside the container, so do not attach it again through its host path: it would show twice.
-- `~/.gitconfig` and `~/.ssh`, read-only: sync commits as you and pushes with your SSH key. The key must have no passphrase (there is no agent in the container). `SYNC_BRANCH` (default `development`) is the only branch sync pushes from.
+- `HUB_FOLDERS_ROOT` (default `$HOME`) read-write at the same path inside the container, so attached folders (for example another repo's `docs/drawings`) can be read and saved, and the paths in `workspace.json` work for both runtimes. Only folders inside it can be attached. Set it narrower (e.g. `HUB_FOLDERS_ROOT=/home/me/repos`) to limit what the container can write. The primary folder is refused if typed again through its host path (it is recognised by inode, not by path).
+- `~/.gitconfig` and `~/.ssh`, read-only: sync commits as you and pushes with your SSH key. The key must have no passphrase (there is no agent in the container). `SYNC_BRANCH` (default `main`) is the only branch sync pushes from.
 
 The image installs `git` and `openssh-client` (Debian packages, `Dockerfile`).
 
@@ -42,7 +42,7 @@ scripts/native.sh install     # npm ci + build in canvas/ (node_modules/ and dis
 scripts/native.sh start       # canvas 127.0.0.1:3000, hub 127.0.0.1:3080, detached; pids and logs in .native/
 scripts/native.sh status | stop | restart
 ```
-- Config: the same `.env` as compose (shell variables win). The defaults match compose: `HUB_REPO=../..` (parent repo root, drawings in its `docs/drawings`), `HUB_BACKUPS=./backups`, `SYNC_BRANCH=development`, `HUB_PORT=3080`. `HUB_WORKSPACE=./workspace` and `HUB_FOLDERS_ROOT=$HOME` (attached folders, see Run). Native only: `CANVAS_PORT` (default 3000; parent repo's MCP expects 3000), `DRAWINGS_DIR`, `PLANTUML_URL`. `UID`/`GID` are ignored.
+- Config: the same `.env` as compose (shell variables win). The defaults match compose: `HUB_REPO=./drawings`, `HUB_DRAWINGS_SUBDIR=.`, `HUB_BACKUPS=./backups`, `SYNC_BRANCH=main`, `HUB_PORT=3080`. `HUB_WORKSPACE=./workspace` and `HUB_FOLDERS_ROOT=$HOME` (attached folders, see Run). Native only: `CANVAS_PORT` (default 3000, where an agent's Excalidraw MCP usually expects it), `DRAWINGS_DIR` (overrides `HUB_REPO`/`HUB_DRAWINGS_SUBDIR` for the drawings path), `PLANTUML_URL`. `UID`/`GID` are ignored.
 - Sync uses your own git, identity and SSH agent, so a key with a passphrase works too.
 - PlantUML/Salt code blocks: set `PLANTUML_URL` to any renderer from [Diagram renderers](#diagram-renderers), e.g. Kroki, or only the plantuml container: `docker run -d -p 127.0.0.1:8080:8080 -e PLANTUML_SECURITY_PROFILE=SANDBOX plantuml/plantuml-server:jetty` and `PLANTUML_URL=http://127.0.0.1:8080`. Unset: the canvas answers "renderer not configured"; Mermaid still works.
 - `start` refuses a busy port: stop the Docker stack first (`docker compose down`). If the hub cannot start, for example because the drawings folder is missing or empty, it prints the log tail and stops the canvas too, if this `start` started it.
@@ -61,9 +61,9 @@ Code-block browser tests (they clear their canvas, so only against the test stac
 
 Without Docker: `npm test` (unit), and `E2E_RUNTIME=native scripts/e2e.sh` (browser). The latter needs `scripts/native.sh install`, `npm ci` in `e2e/` and a Chromium: `npx playwright install chromium` in `e2e/`, or `CHROMIUM_PATH=<chrome binary>`. The native stack uses the same ports (3100, 3180) and a throwaway state folder, and sets every setting itself, so neither `.env` nor exported variables like `CANVAS_URL` reach it. README screenshots (`scripts/screenshots.sh`) stay Docker-only.
 
-`scripts/e2e.sh` builds a throwaway git repo from `fixtures/` with a bare origin and a temp backups folder. It never touches port 3000, `docs/drawings` or parent repo's git. Needs `git` in WSL.
+`scripts/e2e.sh` builds a throwaway git repo from `fixtures/` with a bare origin and a temp backups folder. It never touches port 3000, the real drawings or any real repo. Needs `git` in WSL.
 
 ## Canvas (`canvas/`)
 - A git subtree, not a submodule: no GitHub fork needed, and the files are plain files in this repo.
-- Origin of the code: a local clone of yctimlin/mcp_excalidraw at v2.1.2, branch `feat/code-block-build`, vendored here as a subtree. That playground (parent repo `sandbox/excalidraw-codeblock`) was deleted 2026-11-15; `canvas/` is now the only copy.
-- Upgrade to a new upstream release: `git subtree pull --prefix=canvas https://github.com/yctimlin/mcp_excalidraw.git <tag> --squash`, resolve conflicts in `canvas/frontend/src/App.tsx` and `canvas/src/server.ts`, then bump the MCP image tag in parent repo's `.claude/mcp/excalidraw.sh` to the same version.
+- Origin of the code: a local clone of yctimlin/mcp_excalidraw at v2.1.2, branch `feat/code-block-build`, vendored here as a subtree. That playground was deleted 2026-11-15; `canvas/` is now the only copy.
+- Upgrade to a new upstream release: `git subtree pull --prefix=canvas https://github.com/yctimlin/mcp_excalidraw.git <tag> --squash`, resolve conflicts in `canvas/frontend/src/App.tsx` and `canvas/src/server.ts`, then bump the MCP version used by the agent that talks to this canvas to the same version.

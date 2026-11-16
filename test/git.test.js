@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { commitMessage, createGit, gitRunner } from '../src/git.js';
+import { commitMessage, createGit, gitRunner, repoTopLevel } from '../src/git.js';
 
 const hasGit = (() => { try { execFileSync('git', ['--version']); return true; } catch { return false; } })();
 Object.assign(process.env, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' });
@@ -168,4 +168,20 @@ test('refuses a detached HEAD and a merge in progress, touching nothing', { skip
   try { sh('merge', '-q', 'side'); } catch { /* conflict expected */ }
   await assert.rejects(git.commit('chartroom', ['branch']), /middle of a merge/);
   assert.match(sh('status', '--porcelain'), /^UU README\.md$/m, 'conflict state untouched');
+});
+
+test('repoTopLevel: only the top of a work tree counts (a folder inside some repo, or no repo, gets no sync)', { skip: !hasGit }, async () => {
+  assert.deepEqual(await repoTopLevel(repo), { ok: true });
+  const inner = path.join(repo, 'docs', 'drawings');
+  const r = await repoTopLevel(inner);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /inside the git repository .* not its top level/);
+  const plain = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-nogit-'));
+  assert.match((await repoTopLevel(plain)).reason, /not a git repository/);
+  // A drawings folder that is the repo itself (HUB_DRAWINGS_SUBDIR=.) syncs with an empty drawings path.
+  const flat = createGit({ run: gitRunner(repo), drawingsPath: '', branch: 'dev' });
+  await write('chartroom2/chartroom2_v0.excalidraw');
+  const res = await flat.commit('chartroom2');
+  assert.equal(res.committed, true);
+  assert.deepEqual(sh('show', '--name-only', '--format=', 'HEAD').trim().split('\n'), ['chartroom2/chartroom2_v0.excalidraw']);
 });

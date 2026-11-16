@@ -1,7 +1,7 @@
 // Entry point. Configuration comes from the environment (compose.yaml).
 import path from 'node:path';
 import { createCanvas } from './canvas.js';
-import { createGit, gitRunner } from './git.js';
+import { createGit, gitRunner, repoTopLevel } from './git.js';
 import { checkDrawingsDir } from './mounts.js';
 import { createServer } from './server.js';
 import { createWorkspace } from './workspace.js';
@@ -16,19 +16,22 @@ const backupsDir = process.env.BACKUPS_DIR ?? '/backups';
 const workspaceFile = path.resolve(process.env.WORKSPACE_FILE ?? 'workspace/workspace.json');
 const foldersRoot = process.env.FOLDERS_ROOT || null;
 
-// Git sync is on when REPO_DIR is set and contains the drawings folder.
-let git = null;
-const repo = process.env.REPO_DIR ? path.resolve(process.env.REPO_DIR) : null;
-if (repo) {
-  const rel = path.relative(repo, drawings);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) console.error(`git sync off: ${drawings} is not inside REPO_DIR ${repo}`);
-  else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'development' });
-}
-
 // Exit: under Docker the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race");
 // scripts/native.sh shows this message and stops.
 const notReady = await checkDrawingsDir(drawings);
 if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it; scripts/native.sh stops)`); process.exit(1); }
+
+// Git sync is on when REPO_DIR is the top of a git work tree and contains the drawings folder (spec: standalone).
+// A folder that merely sits inside some other repo (e.g. the default ./drawings inside this checkout) gets no sync.
+let git = null;
+const repo = process.env.REPO_DIR ? path.resolve(process.env.REPO_DIR) : null;
+if (repo) {
+  const rel = path.relative(repo, drawings);
+  const top = await repoTopLevel(repo);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) console.error(`git sync off: ${drawings} is not inside REPO_DIR ${repo}`);
+  else if (!top.ok) console.error(`git sync off: ${top.reason}`);
+  else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'main' });
+}
 
 const workspace = await createWorkspace({ primary: { path: drawings, git }, backupsDir, file: workspaceFile, foldersRoot });
 const server = createServer({

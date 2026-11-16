@@ -12,7 +12,7 @@ Spec: `docs/specs/2026-11-02-excalidraw-hub.md`. Repo: `sandbox/excalidraw-hub` 
 4. **UI** (`feat/ui`): `public/index.html`, `public/app.js`, `public/style.css`. Sidebar of projects and versions (latest marked), iframe, Save/Rename/Delete, unsaved badge, confirm dialogs, `beforeunload`.
 5. **Compose e2e** (`feat/e2e`): `compose.test.yaml` (canvas :3100, hub :3180 on a fixture copy, Playwright 1.56.1 runner), `e2e/hub.spec.mjs` covering list, load, save, rename, delete, unsaved. `scripts/e2e.sh` copies fixtures to a temp dir first.
 6. **Review**: independent subagent review (correctness + security, path traversal). Fix findings. Run the default `docker compose up` stack and do a read-only listing check against the real `docs/drawings`.
-7. **Close**: `## Outcome` here, parent repo task record, conclusion in parent repo.
+7. **Close**: `## Outcome` here, the parent repo task record, conclusion in the parent repo.
 
 ## Verification
 - Unit: `docker run --rm -v $PWD:/app -w /app node:20-slim node --test`.

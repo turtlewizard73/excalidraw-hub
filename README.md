@@ -2,7 +2,7 @@
 
 A local web page that wraps the shared Excalidraw planning canvas with a sidebar of your drawings. You can list, load, save, rename and delete drawings, and a badge shows when the canvas has unsaved changes.
 
-The drawings are the `.excalidraw` files in parent repo's `docs/drawings/`, one folder per project. The canvas is the one parent repo already runs on port 3000, so the agent's Excalidraw MCP sees the same drawing you do.
+The drawings are `.excalidraw` files in a drawings folder, one subfolder per project: by default `drawings/` in this repo, or any folder you point it at, such as `docs/drawings` in one of your repos (`HUB_REPO`, see [Configure](#configure)). The canvas runs on port 3000, so an agent's Excalidraw MCP pointed there sees the same drawing you do.
 
 ```mermaid
 flowchart LR
@@ -10,7 +10,7 @@ flowchart LR
   B -->|iframe| C[canvas :3000]
   A[agent MCP] --> C
   H -->|load / read scene| C
-  H -->|list, write, rename, delete| D[(docs/drawings)]
+  H -->|list, write, rename, delete| D[(drawings folder)]
   C -->|PlantUML / Salt code blocks| P["plantuml-server (or PLANTUML_URL)"]
 ```
 
@@ -30,7 +30,7 @@ Made-up demo data, regenerated with `scripts/screenshots.sh`.
 *Hover a code block to switch between diagram and source, or edit it.*
 
 ## Run
-The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one command starts everything. Pick one way. Both use :3000 and :3080, so run only one at a time. If parent repo's old stock canvas still runs on :3000, stop it first. In this folder:
+The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one command starts everything. Pick one way. Both use :3000 and :3080, so run only one at a time. If another canvas already runs on :3000, stop it first. In this folder:
 
 **Docker** (starts at boot, restarts on crash, includes the PlantUML renderer unless `PLANTUML_URL` is set):
 ```bash
@@ -47,6 +47,17 @@ scripts/native.sh status      # or: stop, restart
 ```
 PlantUML/Salt code blocks need `PLANTUML_URL` set to a renderer, such as a plantuml-server or Kroki ([docs/setup.md](docs/setup.md#diagram-renderers)). Mermaid works without it. It does not start at boot.
 
+Open http://localhost:3080. With no settings the drawings go to `drawings/` here and the ⟳ sync button is off.
+
+## Configure
+Point the hub at a repo of yours in `.env` (or the shell, which wins):
+```bash
+HUB_REPO=/home/me/my-repo          # folder holding the drawings; ⟳ sync is on only if it is a git repo's top level
+HUB_DRAWINGS_SUBDIR=docs/drawings  # drawings folder inside it (default: HUB_REPO itself)
+SYNC_BRANCH=main                   # the only branch ⟳ pushes from (default main)
+```
+A repo that embeds the hub (e.g. as a submodule) can keep these in a small wrapper script that exports them and then runs `docker compose` or `scripts/native.sh` in this folder.
+
 Open http://localhost:3080. Details and overrides (port, repo, sync branch, canvas URL) are in [docs/setup.md](docs/setup.md). Both ways read the same `.env`.
 
 The drawings folder must hold at least one entry, such as a project folder. If it is empty, the hub exits: Docker keeps retrying it (that is how it waits out Docker Desktop connecting the folder after a boot), and `native.sh start` shows why and stops.
@@ -56,13 +67,16 @@ The drawings folder must hold at least one entry, such as a project folder. If i
 - **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder. Every save also writes `<name>.png` next to the drawing.
 - **Save new version:** writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
 - **Revert:** every overwrite first keeps the old file in `backups/` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first, and the file it replaces is kept too.
-- **Folders (workspace):** like a VS Code multi-root workspace. "+ Add folder" attaches another folder that holds project folders, for example `/home/me/other-repo/docs/drawings`; the sidebar then shows one section per folder (named after the repo, full path on hover). ✕ on a section detaches it; its files stay on disk. The list is saved in `workspace/workspace.json` and reopened after a restart. parent repo's own folder is the primary one: always shown, never detached, and the only one with ⟳ sync. Folders must be inside `HUB_FOLDERS_ROOT` (default your home folder). The save form gets a folder picker once there are two or more. A detached or missing folder's drawings are not deleted; a folder that cannot be read shows its error in its section.
-- **Sync (⟳ on a project):** commits that project's folder in parent repo's git repo as "`<project> <names> diagram update`", only that folder. On `development` (`SYNC_BRANCH`) it also pushes, and only the drawings: other unpushed commits on `development` stay local (then run `git pull --rebase` before pushing it yourself; the message says so). On any other branch it asks, then commits without pushing.
+- **Folders (workspace):** like a VS Code multi-root workspace. "+ Add folder" attaches another folder that holds project folders, for example `/home/me/other-repo/docs/drawings`; the sidebar then shows one section per folder (named after the repo, full path on hover). ✕ on a section detaches it; its files stay on disk. The list is saved in `workspace/workspace.json` and reopened after a restart. The configured drawings folder is the primary one: always shown, never detached, and the only one with ⟳ sync. Folders must be inside `HUB_FOLDERS_ROOT` (default your home folder). The save form gets a folder picker once there are two or more. A detached or missing folder's drawings are not deleted; a folder that cannot be read shows its error in its section.
+- **Sync (⟳ on a project):** commits that project's folder in `HUB_REPO`'s git repo as "`<project> <names> diagram update`", only that folder. On `SYNC_BRANCH` (default `main`) it also pushes, and only the drawings: other unpushed commits on that branch stay local (then run `git pull --rebase` before pushing it yourself; the message says so). On any other branch it asks, then commits without pushing.
 - **Rename / delete:** hover a drawing and use ✎ or 🗑. The `.png` with the same name moves or goes with it. Delete asks first.
 - **Agents:** an agent can save with `POST /api/save` without any browser tab open. Elements it drew in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save, and the canvas is updated to match. `GET /api/status` shows how many such elements are waiting (`agentElements`).
 - **Unsaved badge:** "● Unsaved changes" after a real edit, "Saved" after a load or save. Leaving the page with unsaved changes shows the browser's warning.
 
-The sidebar marks the highest version of each project as "latest". Files that don't follow the naming scheme are listed as "unversioned". The scheme is defined in parent repo's CLAUDE.md, in the Drawings section.
+The sidebar marks the highest version of each project as "latest". Files that don't follow the naming scheme are listed as "unversioned". 
+
+### Naming
+`<project>/<project>_v<i>[_<label>].excalidraw`, e.g. `budgeting/budgeting_v1_plan_with_proposal.excalidraw`. "Save new version" picks the next `v<i>`; each meaningful new state of a drawing gets one. A `.png` of a drawing has the same base name. Other `.excalidraw` files in a project folder are listed as "unversioned".
 
 ## Test
 ```bash
@@ -71,7 +85,7 @@ scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git 
 scripts/screenshots.sh   # regenerates the README images in docs/images/ (same isolated stack, made-up drawings)
 ```
 Without Docker: `npm test`, and `E2E_RUNTIME=native scripts/e2e.sh` (after `scripts/native.sh install` and `npm ci` in `e2e/`. Playwright needs a Chromium: `npx playwright install chromium` in `e2e/`, or `CHROMIUM_PATH=<path to chrome>`).
-`scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a throwaway git repo holding a copy of `fixtures/`, with a bare repo as its origin. It never touches port 3000, the real drawings or parent repo's git.
+`scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a throwaway git repo holding a copy of `fixtures/`, with a bare repo as its origin. It never touches port 3000, the real drawings or any real repo.
 
 ## Layout
 | Path | What it is |
@@ -84,7 +98,8 @@ Without Docker: `npm test`, and `E2E_RUNTIME=native scripts/e2e.sh` (after `scri
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |
 | `test/`, `e2e/` | Unit/API tests (`node --test`) and Playwright browser tests |
 | `docs/images/` | README screenshots, made by `scripts/screenshots.sh` from `e2e/readme.shots.js` |
-| `fixtures/` | Test drawings: copies of parent repo's drawings plus an image test |
+| `fixtures/` | Test drawings: sample projects plus an image test |
+| `drawings/` | Default drawings folder when `HUB_REPO` is not set (gitignored) |
 | `probe/` | Scripts that checked the canvas behaviour the design relies on |
 | `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md), [save/revert/sync](docs/plans/2026-11-14-save-revert-sync.md), [workspace folders](docs/plans/2026-11-16-workspace-folders.md)), [setup](docs/setup.md) |
 

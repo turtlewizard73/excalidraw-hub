@@ -1,5 +1,5 @@
 # Isolated test stack: own canvas, hub over a fixture copy, Playwright runner, all on the compose network.
-# Published on 127.0.0.1:3100 / :3180 for debugging only. Never touches parent repo's canvas (:3000) or docs/drawings.
+# Published on 127.0.0.1:3100 / :3180 for debugging only. Never touches the real canvas (:3000) or the real drawings.
 # Run via scripts/e2e.sh.
 name: excalidraw-hub-test
 services:

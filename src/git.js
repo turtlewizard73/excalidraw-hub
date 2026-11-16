@@ -1,4 +1,4 @@
-// Per-project sync of the drawings folder in parent repo's git repo: stage + commit only that folder, push only on
+// Per-project sync of the drawings folder in its git repo (REPO_DIR): stage + commit only that folder, push only on
 // the sync branch. Rules: docs/specs/2026-11-02-excalidraw-hub.md, "Sync a project to git".
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -17,6 +17,14 @@ export function gitRunner(repoDir, timeout = 60000) {
       else resolve(stdout);
     });
   });
+}
+
+/** Whether `dir` is the top of a git work tree: {ok: true}, or {ok: false, reason}. Never throws. */
+export async function repoTopLevel(dir, run = gitRunner(dir, 10000)) {
+  let top;
+  try { top = (await run(['rev-parse', '--show-toplevel'])).trim(); } catch { return { ok: false, reason: `${dir} is not a git repository` }; }
+  const [a, b] = await Promise.all([fs.realpath(top).catch(() => top), fs.realpath(dir).catch(() => dir)]);
+  return a === b ? { ok: true } : { ok: false, reason: `${dir} is inside the git repository ${top}, not its top level` };
 }
 
 /** "<project> <names> diagram update": changed drawings without the `<project>_` prefix, at most 5. */

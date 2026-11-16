@@ -1,7 +1,7 @@
 # Spec: workspace folders (several drawings roots in one sidebar)
 
 ## Goal
-Like a VS Code multi-root workspace: besides the primary drawings folder (`DRAWINGS_DIR`, parent repo's `docs/drawings`), the user can attach more folders, each holding per-project subfolders (for example `<other repo>/docs/drawings`). The sidebar shows one section per folder. Folders are attached and detached in the UI, and the list is saved to a config file, so the hub reopens the same folders after a restart.
+Like a VS Code multi-root workspace: besides the primary drawings folder (`DRAWINGS_DIR`, the parent repo's `docs/drawings`), the user can attach more folders, each holding per-project subfolders (for example `<other repo>/docs/drawings`). The sidebar shows one section per folder. Folders are attached and detached in the UI, and the list is saved to a config file, so the hub reopens the same folders after a restart.
 
 ## Not building
 - No git sync for attached folders. The ⟳ button stays on the primary folder only (it is tied to `REPO_DIR`). Next step if wanted: detect a folder's repo with `git rev-parse --show-toplevel` and give each folder its own `createGit`.
@@ -37,6 +37,6 @@ flowchart LR
 |---|---|
 | Primary from env + attached from file, not all folders in the file | Keeps the current setup, git sync and tests as they are; nothing to migrate. |
 | Hash ids instead of names or indexes | Two repos both have `docs/drawings`, so names collide; indexes shift on detach. A hash of the path is stable and needs no stored state. |
-| Same-path bind mount of `$HOME` under Docker | Paths are the same on host and in the container, so the config file works for both runtimes. Trade-off: the container can write anywhere under that folder (it already writes parent repo). `HUB_FOLDERS_ROOT` narrows it, e.g. `~/repos`. |
+| Same-path bind mount of `$HOME` under Docker | Paths are the same on host and in the container, so the config file works for both runtimes. Trade-off: the container can write anywhere under that folder (it already writes the parent repo). `HUB_FOLDERS_ROOT` narrows it, e.g. `~/repos`. |
 | JSON file, own ~40 lines, no config library | One list of strings; `JSON.parse` plus an atomic rename is all it needs. |
 | Refuse detaching the loaded drawing's folder | The simplest way to keep save/revert from targeting a folder outside the workspace. |

@@ -193,7 +193,7 @@ async function syncProject(project, answered = []) {
   try {
     const res = await api('/api/sync', { project, confirm: answered });
     if (res.needsConfirm) {
-      const question = `parent repo is on branch "${res.branch}", not "${res.syncBranch}".\n\nCommit ${project} on "${res.branch}" anyway? It will not be pushed.`;
+      const question = `The drawings repo is on branch "${res.branch}", not "${res.syncBranch}".\n\nCommit ${project} on "${res.branch}" anyway? It will not be pushed.`;
       return confirm(question) ? syncProject(project, [...answered, res.needsConfirm]) : say(`Sync of ${project} cancelled; nothing changed`);
     }
     if (res.nothing) return say(`Nothing to sync in ${project}`);

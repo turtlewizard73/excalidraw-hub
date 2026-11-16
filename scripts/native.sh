@@ -34,7 +34,7 @@ if [ -f "$env_file" ]; then
 fi
 
 state="$(realpath -m "${NATIVE_DIR:-$root/.native}")"
-canvas_port="${CANVAS_PORT:-3000}"   # parent repo's .claude/mcp/excalidraw.sh connects to :3000
+canvas_port="${CANVAS_PORT:-3000}"   # the agent's Excalidraw MCP expects :3000
 hub_port="${HUB_PORT:-3080}"
 canvas_url="http://127.0.0.1:$canvas_port"
 declare -A marker=([canvas]=dist/server.js [hub]=src/main.js)   # what a live process of ours has on its command line
@@ -82,8 +82,8 @@ start() {
   [ -f canvas/dist/server.js ] && [ -d canvas/dist/frontend ] || die "canvas not built. Run: scripts/native.sh install"
   mkdir -p "$state"
   local repo drawings backups workspace name port rc=0
-  repo="$(realpath "${HUB_REPO:-../..}")"
-  drawings="${DRAWINGS_DIR:-$repo/docs/drawings}"
+  repo="$(realpath "${HUB_REPO:-./drawings}")"
+  drawings="${DRAWINGS_DIR:-$(realpath -m "$repo/${HUB_DRAWINGS_SUBDIR:-.}")}"
   backups="$(mkdir -p "${HUB_BACKUPS:-./backups}" && realpath "${HUB_BACKUPS:-./backups}")"
   workspace="$(mkdir -p "${HUB_WORKSPACE:-./workspace}" && realpath "${HUB_WORKSPACE:-./workspace}")"
   [[ "${HUB_FOLDERS_ROOT:-$HOME}" == /* ]] || die "HUB_FOLDERS_ROOT must be an absolute path (compose needs it too), got: $HUB_FOLDERS_ROOT"
@@ -101,7 +101,7 @@ start() {
   launch hub . "http://127.0.0.1:$hub_port/api/status" env NODE_ENV=production \
     HUB_HOST=127.0.0.1 HUB_PORT="$hub_port" \
     CANVAS_URL="${CANVAS_URL:-$canvas_url}" CANVAS_PUBLIC_URL="${CANVAS_PUBLIC_URL:-http://localhost:$canvas_port}" \
-    REPO_DIR="$repo" DRAWINGS_DIR="$drawings" BACKUPS_DIR="$backups" SYNC_BRANCH="${SYNC_BRANCH:-development}" \
+    REPO_DIR="$repo" DRAWINGS_DIR="$drawings" BACKUPS_DIR="$backups" SYNC_BRANCH="${SYNC_BRANCH:-main}" \
     WORKSPACE_FILE="$workspace/workspace.json" FOLDERS_ROOT="${HUB_FOLDERS_ROOT:-$HOME}" \
     ${HUB_ALLOWED_HOSTS:+HUB_ALLOWED_HOSTS="$HUB_ALLOWED_HOSTS"} node src/main.js || rc=$?
   if [ "$rc" -eq 1 ]; then [ "$started_canvas" -eq 0 ] || stop_one canvas; exit 1; fi

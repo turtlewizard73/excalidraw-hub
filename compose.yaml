@@ -1,14 +1,14 @@
-# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here (deployed copy: parent repo's projects/excalidraw-hub, a submodule).
+# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here. Settings: .env or the shell (see .env.example).
 # Hub http://localhost:3080, canvas http://localhost:3000 (the agent's Excalidraw MCP talks to :3000). See docs/setup.md.
 services:
   canvas:
     # Fork of yctimlin/mcp_excalidraw (git subtree in canvas/): stock canvas + code blocks (Mermaid, PlantUML, Salt).
-    # In-memory scene: a restart empties it; drawings live in parent repo's docs/drawings.
+    # In-memory scene: a restart empties it; drawings live in the hub's drawings folder (HUB_REPO).
     build:
       context: ./canvas
       dockerfile: Dockerfile.canvas
     ports:
-      - "127.0.0.1:3000:3000"   # fixed: parent repo's .claude/mcp/excalidraw.sh connects here
+      - "127.0.0.1:3000:3000"   # fixed: the agent's Excalidraw MCP connects here
     environment:
       # Code blocks: PlantUML/Salt render via the canvas server. Set PLANTUML_URL in .env to use an existing
       # renderer (e.g. https://kroki.io/plantuml) and the plantuml container is not started. Mermaid renders in the browser.
@@ -44,14 +44,14 @@ services:
       CANVAS_URL: "${CANVAS_URL:-http://canvas:3000}"                   # server -> canvas REST (compose network)
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
       HOME: /home/node
-      REPO_DIR: /repo                          # parent repo's git repo, for the per-project sync button
-      DRAWINGS_DIR: /repo/docs/drawings
+      REPO_DIR: /repo                          # HUB_REPO; the sync button is on only if it is a git repo's top level
+      DRAWINGS_DIR: "/repo/${HUB_DRAWINGS_SUBDIR:-.}"   # the drawings folder inside HUB_REPO
       BACKUPS_DIR: /backups
-      SYNC_BRANCH: "${SYNC_BRANCH:-development}"   # sync pushes only from this branch
+      SYNC_BRANCH: "${SYNC_BRANCH:-main}"   # sync pushes only from this branch
       WORKSPACE_FILE: /workspace/workspace.json   # folders attached in the sidebar, reopened after a restart
       FOLDERS_ROOT: "${HUB_FOLDERS_ROOT:-${HOME}}"  # only folders inside it can be attached (mounted below)
     volumes:
-      - "${HUB_REPO:-../..}:/repo"
+      - "${HUB_REPO:-./drawings}:/repo"   # default: drawings/ in this folder (gitignored)
       - "${HUB_BACKUPS:-./backups}:/backups"   # copies of overwritten drawings, for Revert
       - "${HUB_WORKSPACE:-./workspace}:/workspace"   # workspace.json, shared with scripts/native.sh
       # Same path inside as on the host, so a path typed in "+ Add folder" means the same in both runtimes.

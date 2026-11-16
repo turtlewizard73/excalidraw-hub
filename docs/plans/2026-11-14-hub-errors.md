@@ -1,6 +1,6 @@
 # Plan: fix hub errors E1–E4 (2026-11-14)
 
-Input: [handoff](../handoffs/2026-11-14-hub-errors.md). Spec: [2026-11-02-excalidraw-hub.md](../specs/2026-11-02-excalidraw-hub.md), sections "Agent-format elements", "Load", "PNG on save". Branch `feat/hub-errors`, squash-merged to `main` on request. Task record: parent repo `tasks/2026-11-14-excalidraw-hub-errors.md`.
+Input: [handoff](../handoffs/2026-11-14-hub-errors.md). Spec: [2026-11-02-excalidraw-hub.md](../specs/2026-11-02-excalidraw-hub.md), sections "Agent-format elements", "Load", "PNG on save". Branch `feat/hub-errors`, squash-merged to `main` on request. Task record: the parent repo `tasks/2026-11-14-excalidraw-hub-errors.md`.
 
 ## Reproduction (before any code, isolated stack :3100/:3180)
 - **E1 confirmed.** With no tab, `POST /api/elements/batch` of a labelled rectangle and a bound arrow, then `/api/save` → 409 "has not synced from a browser tab yet", indefinitely.

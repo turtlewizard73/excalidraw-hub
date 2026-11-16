@@ -1,4 +1,4 @@
-// Drawing files under one root folder (the docs/drawings mount). Every path goes through `resolve`.
+// Drawing files under one root folder (DRAWINGS_DIR). Every path goes through `resolve`.
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';

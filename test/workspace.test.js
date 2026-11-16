@@ -12,7 +12,7 @@ const make = (extra = {}) => createWorkspace({ primary: { path: primary }, backu
 beforeEach(async () => {
   tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-ws-')));
   home = path.join(tmp, 'home');
-  primary = path.join(home, 'parent repo', 'docs', 'drawings');
+  primary = path.join(home, 'parent', 'docs', 'drawings');
   for (const d of [primary, path.join(home, 'a', 'docs', 'drawings'), path.join(home, 'b', 'docs', 'drawings'), path.join(tmp, 'outside')]) await fs.mkdir(d, { recursive: true });
   file = path.join(tmp, 'ws', 'workspace.json');
 });
@@ -24,7 +24,7 @@ test('attach saves to the file; a new workspace reopens the same folders in orde
   const b = await ws.attach(path.join(home, 'b', 'docs', 'drawings') + '/');
   assert.match(a.id, /^f-[0-9a-f]{12}$/);
   assert.equal(a.name, 'a', 'named after the repo of <repo>/docs/drawings');
-  assert.equal(ws.get('main').name, 'parent repo');
+  assert.equal(ws.get('main').name, 'parent');
   assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { version: 1, folders: [a.path, b.path] });
 
   const again = await make();
@@ -90,12 +90,12 @@ test('saved entries get the same checks as attach: outside the root, the primary
 test('the primary is recognised by identity (Docker: same folder at another path) and nesting is refused', async () => {
   // A bind mount looks like this to the hub: the same directory at a second path. A hard link to a dir is impossible,
   // so simulate it by making the primary a path that resolves elsewhere while FOLDERS_ROOT sees the real folder.
-  const real = path.join(home, 'parent repo', 'docs', 'drawings');
+  const real = path.join(home, 'parent', 'docs', 'drawings');
   const mountPoint = path.join(tmp, 'repo');
-  await fs.symlink(path.join(home, 'parent repo'), mountPoint);
+  await fs.symlink(path.join(home, 'parent'), mountPoint);
   const ws = await make({ primary: { path: path.join(mountPoint, 'docs', 'drawings') } });
   await assert.rejects(ws.attach(real), (e) => e.status === 409 && /primary/.test(e.message));
-  await assert.rejects(ws.attach(path.join(home, 'parent repo')), (e) => e.status === 409 && /primary/.test(e.message), 'contains the primary');
+  await assert.rejects(ws.attach(path.join(home, 'parent')), (e) => e.status === 409 && /primary/.test(e.message), 'contains the primary');
   await ws.attach(path.join(home, 'a'));
   await assert.rejects(ws.attach(path.join(home, 'a', 'docs')), (e) => e.status === 409 && /overlaps/.test(e.message));
 });
