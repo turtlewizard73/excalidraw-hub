@@ -28,3 +28,12 @@ summary .act { visibility: hidden; border: 0; background: none; cursor: pointer;
 details:hover > summary .act { visibility: visible; }
 #message.error { color: #c92a2a; }
 iframe { flex: 1; border: 0; width: 100%; }
+#sidebar h1 { display: flex; align-items: center; justify-content: space-between; }
+#add-folder { font-size: 12px; font-weight: normal; cursor: pointer; }
+section.folder { margin-bottom: 12px; }
+section.folder h2 { display: flex; align-items: center; gap: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #555; margin: 8px 0 4px; padding-bottom: 2px; border-bottom: 1px solid #e5e5e5; }
+section.folder h2 .name { flex: 1; overflow-wrap: anywhere; }
+section.folder h2 .act { visibility: hidden; border: 0; background: none; cursor: pointer; padding: 2px 4px; color: #555; }
+section.folder h2:hover .act { visibility: visible; }
+section.folder p { margin: 2px 0 6px; font-size: 12px; color: #777; }
+section.folder p.error { color: #c92a2a; }

@@ -7,7 +7,7 @@
 </head>
 <body>
   <aside id="sidebar">
-    <h1>Drawings</h1>
+    <h1>Drawings <button type="button" id="add-folder" data-testid="add-folder" hidden title="Attach another folder of projects (saved, reopened after a restart)">+ Add folder</button></h1>
     <div id="projects" aria-live="polite">Loading…</div>
   </aside>
   <main>
@@ -15,6 +15,7 @@
       <span id="current" data-testid="current">No drawing loaded</span>
       <span id="dirty" data-testid="dirty" class="badge"></span>
       <form id="save-form">
+        <select id="save-folder" data-testid="save-folder" hidden title="Folder to save into"></select>
         <input id="save-project" data-testid="save-project" list="project-names" placeholder="project" required>
         <datalist id="project-names"></datalist>
         <input id="save-label" data-testid="save-label" placeholder="label (optional)">

@@ -8,6 +8,7 @@ import { expandAgentElements, isAgentFormat } from './agent.js';
 import { Baseline, buildDocument, missingFiles } from './scene.js';
 import { GitError } from './git.js';
 import { StoreError } from './store.js';
+import { PRIMARY, WorkspaceError, fixedWorkspace } from './workspace.js';
 
 const TMP_PROJECT = 'tmp'; // where unsaved work goes when nothing is loaded and another drawing is opened
 
@@ -25,11 +26,20 @@ async function readJson(req) {
 }
 
 /**
- * @param {{store, canvas, backups, git?, canvasPublicUrl: string, allowedHosts: string[]}} deps
- * allowedHosts: Host header values accepted (DNS-rebinding guard), e.g. ['127.0.0.1:3080', 'localhost:3080'].
- * backups: copies of overwritten drawings, for Revert (src/backups.js). git: per-project sync (src/git.js); absent = off.
+ * @param {{workspace?, store?, canvas, backups?, git?, canvasPublicUrl: string, allowedHosts: string[]}} deps
+ * workspace: the sidebar's folders (src/workspace.js), each with its own store and backups; the primary one may have git.
+ * Without it, store/backups/git make a one-folder workspace. allowedHosts: Host header values accepted (DNS-rebinding
+ * guard), e.g. ['127.0.0.1:3080', 'localhost:3080']. backups: copies of overwritten drawings, for Revert (src/backups.js).
+ * git: per-project sync (src/git.js); absent = off.
  */
-export function createServer({ store, canvas, backups, git = null, canvasPublicUrl, allowedHosts }) {
+export function createServer({ workspace = null, store: soleStore, canvas, backups: soleBackups, git: soleGit = null, canvasPublicUrl, allowedHosts }) {
+  workspace ??= fixedWorkspace({ store: soleStore, backups: soleBackups, git: soleGit });
+  const primaryGit = workspace.get(PRIMARY).git;
+  /** The folder a request names (default: the primary one). */
+  const folderOf = (id) => {
+    if (id !== undefined && typeof id !== 'string') throw new HttpError(400, 'folder must be a string');
+    try { return workspace.get(id ?? PRIMARY); } catch (e) { if (e instanceof WorkspaceError) throw new HttpError(e.status, e.message); throw e; }
+  };
   const baseline = new Baseline();
   // One state-changing request at a time: load/save/revert/rename/delete/commit share the baseline, canvas and files.
   let queue = Promise.resolve();
@@ -40,27 +50,28 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
     'x-frame-options': 'DENY',
     'content-security-policy': `default-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
   };
-  const same = (a, b) => a && b && a.project === b.project && a.file === b.file;
+  const same = (a, b) => a && b && a.folder === b.folder && a.project === b.project && a.file === b.file;
   const liveCount = (elements) => elements.filter((e) => !e.isDeleted).length;
   // Identifies a canvas state: every element's id and last server-side change.
   const fingerprint = (elements) => elements.map((e) => `${e.id}@${e.updatedAt ?? ''}@${e.version ?? ''}`).sort().join('|');
-  const renderPng = async (project, file, result) => {
+  const renderPng = async (store, project, file, result) => {
     // The PNG is a convenience: the drawing is already saved if rendering fails.
     try { await store.writePng(project, file, await canvas.exportPng()); result.png = true; } catch (e) { result.png = false; result.pngError = e.message; }
     return result;
   };
 
-  /** Put `doc` (from project/file, stamped `stamp`) on the canvas and make it the baseline. */
-  async function loadOntoCanvas(project, file, doc, stamp) {
+  /** Put `doc` (from folder/project/file, stamped `stamp`) on the canvas and make it the baseline. */
+  async function loadOntoCanvas(folder, project, file, doc, stamp) {
     // If the load fails, the canvas may hold anything: forget the old drawing so no save can overwrite it.
     baseline.forget();
     await canvas.load(doc);
-    baseline.set({ project, file }, doc.elements, doc.appState);
+    baseline.set({ folder, project, file }, doc.elements, doc.appState);
     baseline.stamp = stamp;
   }
 
   /** Save the canvas. Shared by POST /api/save and by a load that saves unsaved work first. */
-  async function saveCanvas({ project, label, versioned }) {
+  async function saveCanvas({ folder: folderId, project, label, versioned }) {
+    const { id: folder, store, backups } = folderOf(folderId);
     if (!isSafeName(project)) throw new HttpError(400, `invalid project name: ${JSON.stringify(project)}`);
     // Leave room for `_v<up to 9 digits>` within the name limit.
     if (project.length > MAX_NAME - 11) throw new HttpError(400, `project name too long to save into (max ${MAX_NAME - 11} characters)`);
@@ -87,15 +98,15 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
           canvasNow = now; // the canvas moved on: it stays as it is and status shows it as unsaved
         }
       }
-      baseline.set({ project, file }, doc.elements, doc.appState, canvasNow);
+      baseline.set({ folder, project, file }, doc.elements, doc.appState, canvasNow);
       baseline.stamp = await store.stamp(project, file);
-      return renderPng(project, file, { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack });
+      return renderPng(store, project, file, { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack });
     };
     // A new file must not inherit Revert backups of a deleted drawing that had the same name.
     const created = async (file) => { await backups.retire(project, file).catch(() => {}); return saved(file); };
     if (!versioned) {
       if (!isUsableLabel(label)) throw new HttpError(400, 'the label needs a letter or digit (a-z, 0-9) to use in the file name');
-      const { file, overwrite } = plainSaveTarget(project, label, baseline.current);
+      const { file, overwrite } = plainSaveTarget(project, label, baseline.current?.folder === folder ? baseline.current : null);
       if (overwrite) {
         // Overwriting is the one way a save can lose data: refuse whenever the canvas or the file looks wrong.
         const refuse = (why) => new HttpError(409, `${file} not overwritten: ${why}. Use "Save new version" to save a copy.`);
@@ -135,12 +146,36 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
   }
 
   const routes = {
-    'GET /api/config': async () => ({ canvasUrl: canvasPublicUrl, sync: !!git, syncBranch: git?.syncBranch ?? null }),
+    'GET /api/config': async () => ({ canvasUrl: canvasPublicUrl, sync: !!primaryGit, syncBranch: primaryGit?.syncBranch ?? null, canAttach: workspace.canAttach }),
+    // One entry per folder. A folder that cannot be read (gone, unmounted) is listed with its error, so it can be detached.
     'GET /api/projects': async () => {
-      const projects = await store.listProjects();
-      for (const p of projects) for (const d of p.drawings) d.backups = await backups.count(p.name, d.file);
-      return { projects };
+      const folders = [];
+      for (const f of workspace.folders()) {
+        const entry = { id: f.id, name: f.name, path: f.path, primary: f.primary, sync: !!f.git, projects: [] };
+        try {
+          entry.projects = await f.store.listProjects();
+          for (const p of entry.projects) for (const d of p.drawings) d.backups = await f.backups.count(p.name, d.file);
+        } catch (e) { entry.error = `cannot read ${f.path}: ${e.code ?? e.message}`; }
+        folders.push(entry);
+      }
+      return { folders };
     },
+
+    'POST /api/folders/attach': serial(async ({ path: p }) => {
+      try { const f = await workspace.attach(p); return { folder: { id: f.id, name: f.name, path: f.path } }; } catch (e) {
+        if (e instanceof WorkspaceError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }),
+
+    // In the queue: a load or save into this folder must not run while it is being detached.
+    'POST /api/folders/detach': serial(async ({ id }) => {
+      if (baseline.current?.folder === id) throw new HttpError(409, 'the loaded drawing is in this folder; load a drawing from another folder first');
+      try { const f = await workspace.detach(id); return { detached: { id: f.id, path: f.path } }; } catch (e) {
+        if (e instanceof WorkspaceError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }),
 
     'GET /api/status': async () => {
       try {
@@ -155,12 +190,15 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
     },
 
     // Unsaved changes are saved first, no question: into the loaded drawing, or as tmp/tmp_v<n> when none is loaded.
-    'POST /api/load': serial(async ({ project, file }) => {
+    'POST /api/load': serial(async ({ folder: folderId, project, file }) => {
+      const { id: folder, store } = folderOf(folderId);
       await store.read(project, file); // the target must exist before anything is saved for it
       const elements = await canvas.elements();
       let autosaved = null;
       if (baseline.isDirty(elements) && liveCount(elements) > 0) {
-        const target = baseline.current ? { project: baseline.current.project, versioned: false } : { project: TMP_PROJECT, versioned: true };
+        const target = baseline.current
+          ? { folder: baseline.current.folder, project: baseline.current.project, versioned: false }
+          : { folder: PRIMARY, project: TMP_PROJECT, versioned: true };
         try { autosaved = (await saveCanvas(target)).current; } catch (e) {
           if (!(e instanceof HttpError)) throw e;
           throw new HttpError(e.status, `Your unsaved changes could not be saved, so ${file} was not loaded. ${e.message}`, { saveFailed: true });
@@ -169,22 +207,23 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
       // Stamp and read only now: the save above may have just written this very file.
       const stamp = await store.stamp(project, file); // before reading: a change in between then counts as a change
       const doc = await store.read(project, file);
-      await loadOntoCanvas(project, file, doc, stamp);
+      await loadOntoCanvas(folder, project, file, doc, stamp);
       return { current: baseline.current, elementCount: liveCount(doc.elements), autosaved };
     }),
 
     'POST /api/save': serial(saveCanvas),
 
     // Restore the newest backup over the file and load it. The replaced file is kept in _reverted, never lost.
-    'POST /api/revert': serial(async ({ project, file }) => {
-      if (!same(baseline.current, { project, file })) throw new HttpError(409, 'only the loaded drawing can be reverted; load it first');
+    'POST /api/revert': serial(async ({ folder: folderId, project, file }) => {
+      const { id: folder, store, backups } = folderOf(folderId);
+      if (!same(baseline.current, { folder, project, file })) throw new HttpError(409, 'only the loaded drawing can be reverted; load it first');
       await store.read(project, file);
       // Unsaved canvas work is saved over the file first, so it is kept: the revert below moves it to _reverted and
       // restores the newest backup, which that save just made of the last saved state. Net: the edits are dropped
       // from the drawing but not lost.
       const elements = await canvas.elements();
       if (baseline.isDirty(elements) && liveCount(elements) > 0) {
-        try { await saveCanvas({ project, versioned: false }); } catch (e) {
+        try { await saveCanvas({ folder, project, versioned: false }); } catch (e) {
           if (!(e instanceof HttpError)) throw e;
           throw new HttpError(e.status, `Your unsaved changes could not be saved, so nothing was reverted. ${e.message}`);
         }
@@ -197,30 +236,34 @@ export function createServer({ store, canvas, backups, git = null, canvasPublicU
       if (current) await backups.keepReverted(project, file, current);
       await store.overwrite(project, file, backup.bytes);
       await backups.remove(project, file, backup.name);
-      await loadOntoCanvas(project, file, doc, await store.stamp(project, file));
-      return renderPng(project, file, { current: baseline.current, restored: backup.name, remaining: await backups.count(project, file) });
+      await loadOntoCanvas(folder, project, file, doc, await store.stamp(project, file));
+      return renderPng(store, project, file, { current: baseline.current, restored: backup.name, remaining: await backups.count(project, file) });
     }),
 
-    'POST /api/rename': serial(async ({ project, file, newBase }) => {
+    'POST /api/rename': serial(async ({ folder: folderId, project, file, newBase }) => {
+      const { id: folder, store, backups } = folderOf(folderId);
       if (typeof newBase !== 'string' || !isSafeName(newBase)) throw new HttpError(400, `invalid new name: ${JSON.stringify(newBase)}`);
       const newFile = newBase + EXT;
       await store.rename(project, file, newFile);
-      if (same(baseline.current, { project, file })) baseline.current = { project, file: newFile };
+      if (same(baseline.current, { folder, project, file })) baseline.current = { folder, project, file: newFile };
       await backups.move(project, file, newFile).catch((e) => console.error('moving backups failed:', e.message));
-      return { project, file: newFile, current: baseline.current };
+      return { folder, project, file: newFile, current: baseline.current };
     }),
 
     // Deleting the loaded drawing forgets the baseline: the canvas content now exists nowhere on disk, so it is unsaved.
-    'POST /api/delete': serial(async ({ project, file }) => {
+    'POST /api/delete': serial(async ({ folder: folderId, project, file }) => {
+      const { id: folder, store, backups } = folderOf(folderId);
       await store.remove(project, file);
-      if (same(baseline.current, { project, file })) baseline.forget(); // keeps appState for the next save
+      if (same(baseline.current, { folder, project, file })) baseline.forget(); // keeps appState for the next save
       await backups.retire(project, file).catch((e) => console.error('retiring backups failed:', e.message));
-      return { deleted: { project, file }, current: baseline.current };
+      return { deleted: { folder, project, file }, current: baseline.current };
     }),
 
     // Commit in the queue (it reads the drawings), push outside it (network: must not stall loads and saves).
-    'POST /api/sync': async ({ project, confirm }) => {
-      if (!git) throw new HttpError(404, 'git sync is not configured (no REPO_DIR)');
+    // Primary folder only: it is the one inside REPO_DIR (spec: workspace folders, "Not building").
+    'POST /api/sync': async ({ folder: folderId, project, confirm }) => {
+      const { git } = folderOf(folderId);
+      if (!git) throw new HttpError(404, folderId && folderId !== PRIMARY ? 'git sync is only available for the primary folder' : 'git sync is not configured (no REPO_DIR)');
       const answered = Array.isArray(confirm) ? confirm.filter((c) => c === 'branch') : [];
       let result;
       try { result = await serial(() => git.commit(project, answered))(); } catch (e) {

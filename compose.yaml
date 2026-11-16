@@ -48,9 +48,15 @@ services:
       DRAWINGS_DIR: /repo/docs/drawings
       BACKUPS_DIR: /backups
       SYNC_BRANCH: "${SYNC_BRANCH:-development}"   # sync pushes only from this branch
+      WORKSPACE_FILE: /workspace/workspace.json   # folders attached in the sidebar, reopened after a restart
+      FOLDERS_ROOT: "${HUB_FOLDERS_ROOT:-${HOME}}"  # only folders inside it can be attached (mounted below)
     volumes:
       - "${HUB_REPO:-../..}:/repo"
       - "${HUB_BACKUPS:-./backups}:/backups"   # copies of overwritten drawings, for Revert
+      - "${HUB_WORKSPACE:-./workspace}:/workspace"   # workspace.json, shared with scripts/native.sh
+      # Same path inside as on the host, so a path typed in "+ Add folder" means the same in both runtimes.
+      # Read-write: drawings in attached folders are saved there. Narrow it with HUB_FOLDERS_ROOT (e.g. ~/repos).
+      - "${HUB_FOLDERS_ROOT:-${HOME}}:${HUB_FOLDERS_ROOT:-${HOME}}"
       # Your git identity and SSH key, so sync commits as you and can push (key must have no passphrase).
       - "${HOME}/.gitconfig:/home/node/.gitconfig:ro"
       - "${HOME}/.ssh:/home/node/.ssh:ro"

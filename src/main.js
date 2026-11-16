@@ -1,11 +1,10 @@
 // Entry point. Configuration comes from the environment (compose.yaml).
 import path from 'node:path';
-import { createBackups } from './backups.js';
 import { createCanvas } from './canvas.js';
 import { createGit, gitRunner } from './git.js';
 import { checkDrawingsDir } from './mounts.js';
 import { createServer } from './server.js';
-import { createStore } from './store.js';
+import { createWorkspace } from './workspace.js';
 
 const port = Number(process.env.HUB_PORT ?? 3080);
 const host = process.env.HUB_HOST ?? '127.0.0.1';
@@ -13,6 +12,9 @@ const canvasUrl = process.env.CANVAS_URL ?? 'http://127.0.0.1:3000';
 const canvasPublicUrl = process.env.CANVAS_PUBLIC_URL ?? canvasUrl;
 const drawings = path.resolve(process.env.DRAWINGS_DIR ?? '/data');
 const backupsDir = process.env.BACKUPS_DIR ?? '/backups';
+// Attached folders (spec: workspace folders): saved in WORKSPACE_FILE, allowed only inside FOLDERS_ROOT (unset = off).
+const workspaceFile = path.resolve(process.env.WORKSPACE_FILE ?? 'workspace/workspace.json');
+const foldersRoot = process.env.FOLDERS_ROOT || null;
 
 // Git sync is on when REPO_DIR is set and contains the drawings folder.
 let git = null;
@@ -28,14 +30,13 @@ if (repo) {
 const notReady = await checkDrawingsDir(drawings);
 if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it; scripts/native.sh stops)`); process.exit(1); }
 
+const workspace = await createWorkspace({ primary: { path: drawings, git }, backupsDir, file: workspaceFile, foldersRoot });
 const server = createServer({
-  store: createStore(drawings),
+  workspace,
   canvas: createCanvas(canvasUrl),
-  backups: createBackups(backupsDir),
-  git,
   canvasPublicUrl,
   // Host header allowlist (DNS-rebinding guard). Default: the loopback names a local browser uses.
   allowedHosts: process.env.HUB_ALLOWED_HOSTS ? process.env.HUB_ALLOWED_HOSTS.split(',').map((h) => h.trim()) : [`127.0.0.1:${port}`, `localhost:${port}`],
 });
-server.listen(port, host, () => console.log(`excalidraw-hub on http://${host}:${port} (drawings ${drawings}, backups ${backupsDir}, git sync ${git ? `on, branch ${git.syncBranch}` : 'off'}, canvas ${canvasUrl})`));
+server.listen(port, host, () => console.log(`excalidraw-hub on http://${host}:${port} (drawings ${drawings}, ${workspace.folders().length - 1} attached folder(s) from ${workspaceFile}${foldersRoot ? ` (attach inside ${foldersRoot})` : ', attaching off'}, backups ${backupsDir}, git sync ${git ? `on, branch ${git.syncBranch}` : 'off'}, canvas ${canvasUrl})`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => process.exit(0)));

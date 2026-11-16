@@ -32,6 +32,8 @@ services:
       DRAWINGS_DIR: /repo/docs/drawings
       BACKUPS_DIR: /backups
       SYNC_BRANCH: dev
+      WORKSPACE_FILE: /tmp/workspace.json   # never the real workspace/
+      FOLDERS_ROOT: "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"   # a temp folder to attach from, same path as on the host
       GIT_AUTHOR_NAME: e2e
       GIT_AUTHOR_EMAIL: e2e@example.invalid
       GIT_COMMITTER_NAME: e2e
@@ -41,6 +43,7 @@ services:
       - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo"
       - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote"
       - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups"
+      - "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"
     depends_on: [canvas]
   e2e:
     build:
@@ -54,10 +57,12 @@ services:
       DATA_DIR: /repo/docs/drawings
       BACKUPS_DIR: /backups
       REMOTE_DIR: /remote
+      EXTRA_DIR: "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"
       HOME: /tmp
     volumes:
       - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo:ro"
       - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote:ro"
       - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups:ro"
+      - "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:ro"
       - "./test-results:/e2e/test-results"
     depends_on: [hub]

@@ -81,10 +81,12 @@ start() {
   check_tools
   [ -f canvas/dist/server.js ] && [ -d canvas/dist/frontend ] || die "canvas not built. Run: scripts/native.sh install"
   mkdir -p "$state"
-  local repo drawings backups name port rc=0
+  local repo drawings backups workspace name port rc=0
   repo="$(realpath "${HUB_REPO:-../..}")"
   drawings="${DRAWINGS_DIR:-$repo/docs/drawings}"
   backups="$(mkdir -p "${HUB_BACKUPS:-./backups}" && realpath "${HUB_BACKUPS:-./backups}")"
+  workspace="$(mkdir -p "${HUB_WORKSPACE:-./workspace}" && realpath "${HUB_WORKSPACE:-./workspace}")"
+  [[ "${HUB_FOLDERS_ROOT:-$HOME}" == /* ]] || die "HUB_FOLDERS_ROOT must be an absolute path (compose needs it too), got: $HUB_FOLDERS_ROOT"
   for name in canvas hub; do
     port="$canvas_port"; [ "$name" = hub ] && port="$hub_port"
     pid_of "$name" >/dev/null || ! port_busy "$port" || die "port $port is in use by another program (Docker stack still up? docker compose down)"
@@ -100,6 +102,7 @@ start() {
     HUB_HOST=127.0.0.1 HUB_PORT="$hub_port" \
     CANVAS_URL="${CANVAS_URL:-$canvas_url}" CANVAS_PUBLIC_URL="${CANVAS_PUBLIC_URL:-http://localhost:$canvas_port}" \
     REPO_DIR="$repo" DRAWINGS_DIR="$drawings" BACKUPS_DIR="$backups" SYNC_BRANCH="${SYNC_BRANCH:-development}" \
+    WORKSPACE_FILE="$workspace/workspace.json" FOLDERS_ROOT="${HUB_FOLDERS_ROOT:-$HOME}" \
     ${HUB_ALLOWED_HOSTS:+HUB_ALLOWED_HOSTS="$HUB_ALLOWED_HOSTS"} node src/main.js || rc=$?
   if [ "$rc" -eq 1 ]; then [ "$started_canvas" -eq 0 ] || stop_one canvas; exit 1; fi
   echo "native: open http://localhost:$hub_port"

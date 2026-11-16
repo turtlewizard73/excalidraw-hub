@@ -12,6 +12,11 @@ tmp="$(mktemp -d /tmp/excalidraw-hub-e2e.XXXXXX)"
 repo="$tmp/repo" remote="$tmp/remote.git" backups="$tmp/backups"
 mkdir -p "$repo/docs/drawings" "$backups"
 cp -r "${SEED_DIR:-fixtures}/." "$repo/docs/drawings/"
+# A second folder to attach (e2e/workspace.spec.js); FOLDERS_ROOT of the test hub.
+extra="$tmp/extra"
+mkdir -p "$extra/other-repo/docs/drawings/notes"
+echo '{"type":"excalidraw","version":2,"elements":[{"id":"n1","type":"rectangle","x":0,"y":0,"width":80,"height":40}],"appState":{}}' \
+  > "$extra/other-repo/docs/drawings/notes/notes_v0.excalidraw"
 # Throwaway repo on dev with a bare origin; inside the containers origin is /remote, natively the real path.
 g() { git -C "$repo" -c user.name=e2e -c user.email=e2e@example.invalid "$@"; }
 git init -q --bare -b dev "$remote"
@@ -26,18 +31,19 @@ if [ "$runtime" = native ]; then
     NATIVE_ENV_FILE=/dev/null NATIVE_DIR="$tmp/native" CANVAS_PORT=3100 HUB_PORT=3180 \
     CANVAS_URL=http://127.0.0.1:3100 CANVAS_PUBLIC_URL=http://localhost:3100 PLANTUML_URL= HUB_ALLOWED_HOSTS= \
     HUB_REPO="$repo" DRAWINGS_DIR="$repo/docs/drawings" HUB_BACKUPS="$backups" SYNC_BRANCH=dev \
+    HUB_WORKSPACE="$tmp/workspace" HUB_FOLDERS_ROOT="$extra" \
     GIT_AUTHOR_NAME=e2e GIT_AUTHOR_EMAIL=e2e@example.invalid GIT_COMMITTER_NAME=e2e GIT_COMMITTER_EMAIL=e2e@example.invalid \
     scripts/native.sh "$@"
   }
   trap 'native stop >/dev/null 2>&1; rm -rf "$tmp"' EXIT
   native start
   (cd e2e && HUB_URL=http://127.0.0.1:3180 CANVAS_URL=http://127.0.0.1:3100 DATA_DIR="$repo/docs/drawings" \
-    BACKUPS_DIR="$backups" REMOTE_DIR="$remote" npx playwright test "$@")
+    BACKUPS_DIR="$backups" REMOTE_DIR="$remote" EXTRA_DIR="$extra" npx playwright test "$@")
   exit
 fi
 
 g remote add origin /remote
-export HUB_TEST_REPO="$repo" HUB_TEST_REMOTE="$remote" HUB_TEST_BACKUPS="$backups" UID GID="$(id -g)"
+export HUB_TEST_REPO="$repo" HUB_TEST_REMOTE="$remote" HUB_TEST_BACKUPS="$backups" HUB_TEST_EXTRA="$extra" UID GID="$(id -g)"
 dc() { docker compose -f compose.test.yaml "$@"; }
 trap 'dc --profile e2e down --remove-orphans >/dev/null 2>&1; rm -rf "$tmp"' EXIT
 dc up -d --build canvas hub

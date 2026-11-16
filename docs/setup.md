@@ -17,6 +17,8 @@ docker compose up -d --build
 The hub mounts:
 - parent repo's root at `/repo` (override with `HUB_REPO`); drawings are its `docs/drawings`. Read-write, for saving and for the sync button's `git add/commit/push`.
 - `./backups` for Revert (override with `HUB_BACKUPS`).
+- `./workspace` at `/workspace` (override with `HUB_WORKSPACE`): `workspace.json`, the folders attached with "+ Add folder".
+- `HUB_FOLDERS_ROOT` (default `$HOME`) read-write at the same path inside the container, so attached folders (for example another repo's `docs/drawings`) can be read and saved, and the paths in `workspace.json` work for both runtimes. Only folders inside it can be attached. Set it narrower (e.g. `HUB_FOLDERS_ROOT=/home/me/repos`) to limit what the container can write. parent repo's own folder is `/repo/docs/drawings` inside the container, so do not attach it again through its host path: it would show twice.
 - `~/.gitconfig` and `~/.ssh`, read-only: sync commits as you and pushes with your SSH key. The key must have no passphrase (there is no agent in the container). `SYNC_BRANCH` (default `development`) is the only branch sync pushes from.
 
 The image installs `git` and `openssh-client` (Debian packages, `Dockerfile`).
@@ -40,7 +42,7 @@ scripts/native.sh install     # npm ci + build in canvas/ (node_modules/ and dis
 scripts/native.sh start       # canvas 127.0.0.1:3000, hub 127.0.0.1:3080, detached; pids and logs in .native/
 scripts/native.sh status | stop | restart
 ```
-- Config: the same `.env` as compose (shell variables win). The defaults match compose: `HUB_REPO=../..` (parent repo root, drawings in its `docs/drawings`), `HUB_BACKUPS=./backups`, `SYNC_BRANCH=development`, `HUB_PORT=3080`. Native only: `CANVAS_PORT` (default 3000; parent repo's MCP expects 3000), `DRAWINGS_DIR`, `PLANTUML_URL`. `UID`/`GID` are ignored.
+- Config: the same `.env` as compose (shell variables win). The defaults match compose: `HUB_REPO=../..` (parent repo root, drawings in its `docs/drawings`), `HUB_BACKUPS=./backups`, `SYNC_BRANCH=development`, `HUB_PORT=3080`. `HUB_WORKSPACE=./workspace` and `HUB_FOLDERS_ROOT=$HOME` (attached folders, see Run). Native only: `CANVAS_PORT` (default 3000; parent repo's MCP expects 3000), `DRAWINGS_DIR`, `PLANTUML_URL`. `UID`/`GID` are ignored.
 - Sync uses your own git, identity and SSH agent, so a key with a passphrase works too.
 - PlantUML/Salt code blocks: set `PLANTUML_URL` to any renderer from [Diagram renderers](#diagram-renderers), e.g. Kroki, or only the plantuml container: `docker run -d -p 127.0.0.1:8080:8080 -e PLANTUML_SECURITY_PROFILE=SANDBOX plantuml/plantuml-server:jetty` and `PLANTUML_URL=http://127.0.0.1:8080`. Unset: the canvas answers "renderer not configured"; Mermaid still works.
 - `start` refuses a busy port: stop the Docker stack first (`docker compose down`). If the hub cannot start, for example because the drawings folder is missing or empty, it prints the log tail and stops the canvas too, if this `start` started it.

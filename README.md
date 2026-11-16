@@ -56,6 +56,7 @@ The drawings folder must hold at least one entry, such as a project folder. If i
 - **Save:** pick a project, optionally type a label, click "Save". With no label this overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk. With a label, or with nothing loaded, it writes `<project>[_<label>].excalidraw` and refuses if that file exists. A new project name creates the folder. Every save also writes `<name>.png` next to the drawing.
 - **Save new version:** writes `<project>_v<next>[_<label>].excalidraw` and never overwrites.
 - **Revert:** every overwrite first keeps the old file in `backups/` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first, and the file it replaces is kept too.
+- **Folders (workspace):** like a VS Code multi-root workspace. "+ Add folder" attaches another folder that holds project folders, for example `/home/me/other-repo/docs/drawings`; the sidebar then shows one section per folder (named after the repo, full path on hover). ✕ on a section detaches it; its files stay on disk. The list is saved in `workspace/workspace.json` and reopened after a restart. parent repo's own folder is the primary one: always shown, never detached, and the only one with ⟳ sync. Folders must be inside `HUB_FOLDERS_ROOT` (default your home folder). The save form gets a folder picker once there are two or more. A detached or missing folder's drawings are not deleted; a folder that cannot be read shows its error in its section.
 - **Sync (⟳ on a project):** commits that project's folder in parent repo's git repo as "`<project> <names> diagram update`", only that folder. On `development` (`SYNC_BRANCH`) it also pushes, and only the drawings: other unpushed commits on `development` stay local (then run `git pull --rebase` before pushing it yourself; the message says so). On any other branch it asks, then commits without pushing.
 - **Rename / delete:** hover a drawing and use ✎ or 🗑. The `.png` with the same name moves or goes with it. Delete asks first.
 - **Agents:** an agent can save with `POST /api/save` without any browser tab open. Elements it drew in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save, and the canvas is updated to match. `GET /api/status` shows how many such elements are waiting (`agentElements`).
@@ -76,15 +77,16 @@ Without Docker: `npm test`, and `E2E_RUNTIME=native scripts/e2e.sh` (after `scri
 | Path | What it is |
 |---|---|
 | `canvas/` | The canvas on :3000: git subtree of a [yctimlin/mcp_excalidraw](https://github.com/yctimlin/mcp_excalidraw) 2.1.2 fork, plus code blocks (paste Mermaid / PlantUML / Salt, hover to toggle code and diagram). Design: `canvas/docs/specs/2026-11-14-code-block.md` |
-| `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `backups.js` (copies for Revert), `git.js` (sync), `canvas.js` (canvas client), `server.js` (HTTP API) |
-| `backups/` | Copies of overwritten drawings, for Revert (gitignored) |
+| `src/` | Server: `names.js` (naming rules), `scene.js` (unsaved detection, save format), `agent.js` (expands agent elements), `store.js` (files), `backups.js` (copies for Revert), `workspace.js` (attached folders, `workspace.json`), `git.js` (sync), `canvas.js` (canvas client), `server.js` (HTTP API) |
+| `backups/` | Copies of overwritten drawings, for Revert (gitignored). Attached folders' copies are under `backups/_folders/<id>/` |
+| `workspace/` | `workspace.json`: the attached folders (gitignored) |
 | `scripts/` | `native.sh` (run without Docker), `e2e.sh` (browser tests, Docker or native), `screenshots.sh` |
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |
 | `test/`, `e2e/` | Unit/API tests (`node --test`) and Playwright browser tests |
 | `docs/images/` | README screenshots, made by `scripts/screenshots.sh` from `e2e/readme.shots.js` |
 | `fixtures/` | Test drawings: copies of parent repo's drawings plus an image test |
 | `probe/` | Scripts that checked the canvas behaviour the design relies on |
-| `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md), [save/revert/sync](docs/plans/2026-11-14-save-revert-sync.md)), [setup](docs/setup.md) |
+| `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md), [save/revert/sync](docs/plans/2026-11-14-save-revert-sync.md), [workspace folders](docs/plans/2026-11-16-workspace-folders.md)), [setup](docs/setup.md) |
 
 ## Limits
 - Background and grid changes made in the canvas are not saved, because the canvas does not expose them. A saved drawing keeps the background it was loaded with.

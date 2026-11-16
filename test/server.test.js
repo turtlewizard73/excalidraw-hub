@@ -64,19 +64,19 @@ beforeEach(async () => {
 afterEach(() => { canvas.server.close(); hub.close(); });
 
 test('list → load → clean → edit → dirty → save new version → clean', async () => {
-  const { projects } = await get('/api/projects');
+  const { projects } = (await get('/api/projects')).folders[0];
   assert.deepEqual(projects.map((p) => [p.name, p.drawings.map((d) => [d.file, d.latest, d.png])]), [['budgeting', [['budgeting_v0_plan.excalidraw', true, true]]]]);
   assert.equal((await get('/api/status')).dirty, false, 'empty canvas, nothing loaded');
 
   const load = await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   assert.equal(load.status, 200);
-  assert.deepEqual((await get('/api/status')), { current: { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' }, dirty: false, canvas: 'ok', elementCount: 2, agentElements: 2 });
+  assert.deepEqual((await get('/api/status')), { current: { folder: 'main', project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' }, dirty: false, canvas: 'ok', elementCount: 2, agentElements: 2 });
 
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
 
   const save = await (await post('/api/save', { project: 'budgeting', label: 'With C', versioned: true })).json();
-  assert.deepEqual(save.current, { project: 'budgeting', file: 'budgeting_v1_with_c.excalidraw' });
+  assert.deepEqual(save.current, { folder: 'main', project: 'budgeting', file: 'budgeting_v1_with_c.excalidraw' });
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v1_with_c.excalidraw'), 'utf8'));
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
   assert.equal('createdAt' in saved.elements[0], false, 'server keys stripped');
@@ -91,13 +91,13 @@ test('switching saves unsaved work into the loaded drawing first, backing up the
   canvas.state.elements.set('x', rect('x'));
   const res = await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' });
   assert.equal(res.status, 200);
-  assert.deepEqual((await res.json()).autosaved, { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.deepEqual((await res.json()).autosaved, { folder: 'main', project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.excalidraw'), 'utf8'));
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'x']);
   assert.deepEqual([...canvas.state.elements.keys()], ['o'], 'then the other drawing is loaded');
   const [backup] = await fs.readdir(path.join(backupsDir, 'budgeting', 'budgeting_v0_plan'));
   assert.deepEqual(await fs.readFile(path.join(backupsDir, 'budgeting', 'budgeting_v0_plan', backup)), original, 'the old file is kept byte for byte');
-  const listed = (await get('/api/projects')).projects[0].drawings.find((d) => d.file === 'budgeting_v0_plan.excalidraw');
+  const listed = (await get('/api/projects')).folders[0].projects[0].drawings.find((d) => d.file === 'budgeting_v0_plan.excalidraw');
   assert.equal(listed.backups, 1);
 });
 
@@ -114,7 +114,7 @@ test('clicking the loaded drawing while dirty saves it and shows the saved state
 test('switching with nothing loaded saves to tmp/; with an empty canvas there is nothing to save', async () => {
   canvas.state.elements.set('x', rect('x'));
   const res = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
-  assert.deepEqual(res.autosaved, { project: 'tmp', file: 'tmp_v0.excalidraw' });
+  assert.deepEqual(res.autosaved, { folder: 'main', project: 'tmp', file: 'tmp_v0.excalidraw' });
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'tmp', 'tmp_v0.excalidraw'), 'utf8')).elements.map((e) => e.id), ['x']);
   canvas.state.elements.clear(); // e.g. the canvas restarted: dirty, but nothing to lose
   const again = await (await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' })).json();
@@ -133,7 +133,7 @@ test('a refused save stops the switch and says why', async () => {
   assert.equal(body.saveFailed, true);
   assert.match(body.error, /could not be saved, so other\.excalidraw was not loaded.*changed on disk.*Save new version/);
   assert.ok(canvas.state.elements.has('x'), 'canvas untouched');
-  assert.deepEqual((await get('/api/status')).current, { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+  assert.deepEqual((await get('/api/status')).current, { folder: 'main', project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   assert.equal((await post('/api/load', { project: 'budgeting', file: 'missing.excalidraw' })).status, 404, 'a missing target saves nothing');
 });
 
@@ -190,7 +190,7 @@ test('sync: off without git; passes only known confirmations to git', async () =
   const r = await (await fetch(`${url}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: 'budgeting', confirm: ['ahead', 'evil', 'branch'] }) })).json();
   assert.equal(r.pushed, true);
   assert.deepEqual(seen, [['branch']]);
-  assert.deepEqual(await (await fetch(`${url}/api/config`)).json(), { canvasUrl: '', sync: true, syncBranch: 'dev' });
+  assert.deepEqual(await (await fetch(`${url}/api/config`)).json(), { canvasUrl: '', sync: true, syncBranch: 'dev', canAttach: false });
   s.close();
 });
 
@@ -199,7 +199,7 @@ test('backups follow a rename; delete and a new file of the same name do not inh
   canvas.state.elements.set('c', rect('c'));
   await post('/api/save', { project: 'budgeting', versioned: false });
   await post('/api/rename', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', newBase: 'budgeting_v0_moved' });
-  const drawings = async () => (await get('/api/projects')).projects[0].drawings;
+  const drawings = async () => (await get('/api/projects')).folders[0].projects[0].drawings;
   assert.equal((await drawings()).find((d) => d.file === 'budgeting_v0_moved.excalidraw').backups, 1);
   await post('/api/delete', { project: 'budgeting', file: 'budgeting_v0_moved.excalidraw' });
   await fs.writeFile(path.join(dir, 'budgeting', 'x.excalidraw'), JSON.stringify({ elements: [] }));
@@ -285,7 +285,7 @@ test('png: an overwrite regenerates it; a render failure still saves the drawing
 test('rename and delete follow the current drawing and its png', async () => {
   await post('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
   const r = await (await post('/api/rename', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw', newBase: 'budgeting_v0_first' })).json();
-  assert.deepEqual(r.current, { project: 'budgeting', file: 'budgeting_v0_first.excalidraw' });
+  assert.deepEqual(r.current, { folder: 'main', project: 'budgeting', file: 'budgeting_v0_first.excalidraw' });
   assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_first.excalidraw', 'budgeting_v0_first.png']);
   const d = await (await post('/api/delete', { project: 'budgeting', file: 'budgeting_v0_first.excalidraw' })).json();
   assert.equal(d.current, null);
@@ -327,7 +327,7 @@ test('deleting the loaded drawing makes the canvas count as unsaved', async () =
   await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
   const res = await post('/api/load', { project: 'budgeting', file: 'other.excalidraw' });
   assert.equal(res.status, 200);
-  assert.deepEqual((await res.json()).autosaved, { project: 'tmp', file: 'tmp_v0.excalidraw' }, 'nothing loaded any more: the work went to tmp/');
+  assert.deepEqual((await res.json()).autosaved, { folder: 'main', project: 'tmp', file: 'tmp_v0.excalidraw' }, 'nothing loaded any more: the work went to tmp/');
 });
 
 test('same-origin posts pass, oversized bodies are refused', async () => {
@@ -389,7 +389,7 @@ test('versioning off: save overwrites the loaded drawing and becomes clean', asy
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
   const save = await (await post('/api/save', { project: 'budgeting', versioned: false })).json();
-  assert.deepEqual(save.current, { project: 'budgeting', file });
+  assert.deepEqual(save.current, { folder: 'main', project: 'budgeting', file });
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'budgeting', file), 'utf8'));
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
   assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' });
@@ -441,7 +441,7 @@ describe('guards on overwriting the loaded drawing', () => {
     assert.equal(res.status, 409);
     assert.match((await res.json()).error, pattern);
     assert.equal(await fs.readFile(p(), 'utf8'), before, 'file untouched');
-    assert.deepEqual((await get('/api/status')).current, { project: 'budgeting', file }, 'still loaded');
+    assert.deepEqual((await get('/api/status')).current, { folder: 'main', project: 'budgeting', file }, 'still loaded');
   }
 
   test('a canvas that restarted empty does not wipe the file; versioned still saves', async () => {
@@ -498,7 +498,72 @@ describe('guards on overwriting the loaded drawing', () => {
   test('saving into another project does not touch the loaded drawing', async () => {
     const before = await fs.readFile(p(), 'utf8');
     const save = await (await post('/api/save', { project: 'elsewhere', versioned: false })).json();
-    assert.deepEqual(save.current, { project: 'elsewhere', file: 'elsewhere.excalidraw' });
+    assert.deepEqual(save.current, { folder: 'main', project: 'elsewhere', file: 'elsewhere.excalidraw' });
     assert.equal(await fs.readFile(p(), 'utf8'), before);
+  });
+});
+
+describe('workspace folders', () => {
+  let ws, home, other, wsHub, wbase;
+  const wpost = (route, body) => fetch(wbase + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const wget = async (route) => (await fetch(wbase + route)).json();
+
+  beforeEach(async () => {
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-home-')));
+    other = path.join(home, 'repo-b', 'docs', 'drawings');
+    await fs.mkdir(path.join(other, 'budgeting'), { recursive: true });
+    await fs.writeFile(path.join(other, 'budgeting', 'budgeting_v0.excalidraw'), JSON.stringify({ elements: [rect('other')] }));
+    const { createWorkspace } = await import('../src/workspace.js');
+    ws = await createWorkspace({ primary: { path: dir }, backupsDir, file: path.join(home, 'workspace.json'), foldersRoot: home, log: () => {} });
+    wsHub = createServer({ workspace: ws, canvas: createCanvas(`http://127.0.0.1:${canvas.server.address().port}`), canvasPublicUrl: '' });
+    wbase = await listen(wsHub);
+  });
+  afterEach(() => { wsHub.closeAllConnections(); wsHub.close(); });
+
+  test('attach lists the folder; load and save there use its own files and backups; same project name in both', async () => {
+    assert.equal((await wget('/api/config')).canAttach, true);
+    const attach = await (await wpost('/api/folders/attach', { path: other })).json();
+    const id = attach.folder.id;
+    const { folders } = await wget('/api/projects');
+    assert.deepEqual(folders.map((f) => [f.id, f.primary, f.sync, f.projects.map((p) => p.name)]), [['main', true, false, ['budgeting']], [id, false, false, ['budgeting']]]);
+
+    const load = await (await wpost('/api/load', { folder: id, project: 'budgeting', file: 'budgeting_v0.excalidraw' })).json();
+    assert.deepEqual(load.current, { folder: id, project: 'budgeting', file: 'budgeting_v0.excalidraw' });
+    assert.deepEqual([...canvas.state.elements.keys()], ['other']);
+    canvas.state.elements.set('z', rect('z'));
+    const save = await (await wpost('/api/save', { folder: id, project: 'budgeting', versioned: false })).json();
+    assert.deepEqual(save.current, { folder: id, project: 'budgeting', file: 'budgeting_v0.excalidraw' }, 'overwrites the loaded drawing in its folder');
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(other, 'budgeting', 'budgeting_v0.excalidraw'), 'utf8')).elements.map((e) => e.id).sort(), ['other', 'z']);
+    assert.equal((await fs.readdir(path.join(backupsDir, '_folders', id, 'budgeting', 'budgeting_v0'))).length, 1);
+    assert.deepEqual(await fs.readdir(path.join(dir, 'budgeting')), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png'], 'primary untouched');
+
+    // Same project name, other folder: a plain save there must not overwrite the loaded drawing's name.
+    canvas.state.elements.set('w', rect('w'));
+    const cross = await (await wpost('/api/save', { project: 'budgeting', versioned: false })).json();
+    assert.deepEqual(cross.current, { folder: 'main', project: 'budgeting', file: 'budgeting.excalidraw' });
+
+    const sync = await wpost('/api/sync', { folder: id, project: 'budgeting' });
+    assert.equal(sync.status, 404);
+  });
+
+  test('detach: refused for the loaded drawing\'s folder, then removes it and the file reflects it; unknown folder is 404', async () => {
+    const { folder } = await (await wpost('/api/folders/attach', { path: other })).json();
+    await wpost('/api/load', { folder: folder.id, project: 'budgeting', file: 'budgeting_v0.excalidraw' });
+    assert.equal((await wpost('/api/folders/detach', { id: folder.id })).status, 409);
+    await wpost('/api/load', { project: 'budgeting', file: 'budgeting_v0_plan.excalidraw' });
+    assert.equal((await wpost('/api/folders/detach', { id: folder.id })).status, 200);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(home, 'workspace.json'), 'utf8')).folders, []);
+    assert.ok(await fs.stat(path.join(other, 'budgeting', 'budgeting_v0.excalidraw')), 'files stay on disk');
+    assert.equal((await wpost('/api/load', { folder: folder.id, project: 'budgeting', file: 'budgeting_v0.excalidraw' })).status, 404);
+    assert.equal((await wpost('/api/folders/attach', { path: '/etc' })).status, 403);
+  });
+
+  test('a folder that went missing is listed with its error; the others still list', async () => {
+    const { folder } = await (await wpost('/api/folders/attach', { path: other })).json();
+    await fs.rm(path.join(home, 'repo-b'), { recursive: true });
+    const { folders } = await wget('/api/projects');
+    assert.equal(folders[0].projects.length, 1);
+    assert.equal(folders[1].id, folder.id);
+    assert.match(folders[1].error, /cannot read .*ENOENT/);
   });
 });
