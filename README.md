@@ -14,6 +14,21 @@ flowchart LR
   C -->|PlantUML / Salt code blocks| P[plantuml-server]
 ```
 
+## What it looks like
+Made-up demo data, regenerated with `scripts/screenshots.sh`.
+
+![Sidebar with projects, versions, latest/unversioned tags and hover actions, next to a loaded drawing](docs/images/hub-overview.png)
+*Sidebar: one folder per project, highest version marked "latest", off-scheme files "unversioned". Hovering a drawing shows rename and delete; ⟳ commits the project to git.*
+
+![The badge reads Unsaved changes after an ellipse was drawn](docs/images/hub-unsaved.png)
+*Any real edit turns the badge to "● Unsaved changes".*
+
+![Mermaid flowchart, PlantUML sequence diagram and Salt wireframe on the canvas](docs/images/code-blocks.png)
+*Code blocks: paste Mermaid, PlantUML or Salt text and it is rendered on the canvas. Saved here as `recipes_v2_flows` with the form at the top.*
+
+![A code block in code view with Diagram and Edit buttons](docs/images/code-block-toggle.png)
+*Hover a code block to switch between diagram and source, or edit it.*
+
 ## Run
 The canvas runs from this repo too (`canvas/`, a fork of yctimlin/mcp_excalidraw with code blocks), so one compose starts everything. If parent repo's old stock canvas still runs on :3000, stop it first. In this folder:
 
@@ -42,6 +57,7 @@ The sidebar marks the highest version of each project as "latest". Files that do
 ```bash
 docker build -t excalidraw-hub-unit . && docker run --rm -u 1000:1000 -e HOME=/tmp -v "$PWD:/app:ro" -w /app excalidraw-hub-unit node --test test/   # unit + API + real git (the image has git)
 scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git repo
+scripts/screenshots.sh   # regenerates the README images in docs/images/ (same isolated stack, made-up drawings)
 ```
 `scripts/e2e.sh` starts its own canvas (port 3100) and hub (port 3180) over a throwaway git repo holding a copy of `fixtures/`, with a bare repo as its origin. It never touches port 3000, the real drawings or parent repo's git.
 
@@ -53,6 +69,7 @@ scripts/e2e.sh   # browser tests, Playwright in Docker, against a throwaway git 
 | `backups/` | Copies of overwritten drawings, for Revert (gitignored) |
 | `public/` | The page: one HTML file, a script and a stylesheet, no build step |
 | `test/`, `e2e/` | Unit/API tests (`node --test`) and Playwright browser tests |
+| `docs/images/` | README screenshots, made by `scripts/screenshots.sh` from `e2e/readme.shots.js` |
 | `fixtures/` | Test drawings: copies of parent repo's drawings plus an image test |
 | `probe/` | Scripts that checked the canvas behaviour the design relies on |
 | `docs/` | [Spec](docs/specs/2026-11-02-excalidraw-hub.md), plans with outcome ([build](docs/plans/2026-11-02-excalidraw-hub.md), [error fixes](docs/plans/2026-11-14-hub-errors.md), [save/revert/sync](docs/plans/2026-11-14-save-revert-sync.md)), [setup](docs/setup.md) |
