@@ -48,9 +48,9 @@ test('save buttons: Save and Save new version; Revert off with nothing loaded', 
 });
 
 test('list: projects and versions, latest marked, off-scheme files listed plainly', async () => {
-  await expect(page.locator('details[data-project]')).toHaveCount(5);
+  await expect(page.locator('details[data-project]')).toHaveCount(6);
   const names = await page.locator('details[data-project]').evaluateAll((els) => els.map((e) => e.dataset.project));
-  expect(names).toEqual(['ai-map', 'budgeting', 'excalidraw-test', 'f1-title-2026', 'image-test']);
+  expect(names).toEqual(['ai-map', 'budgeting', 'excalidraw-test', 'f1-title-2026', 'image-test', 'nested']);
   await expect(page.locator('details[data-project="budgeting"] li').first()).toHaveAttribute('data-file', 'budgeting_v1_plan_with_proposal.excalidraw');
   await expect(drawing(page, 'budgeting_v1_plan_with_proposal.excalidraw').locator('.tag')).toHaveText('latest');
   await expect(drawing(page, 'budgeting_v0_plan.excalidraw').locator('.tag')).toHaveCount(0);
