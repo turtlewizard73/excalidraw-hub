@@ -5,9 +5,7 @@ test-results/
 .prodcheck/
 backups/*
 !backups/.gitkeep
-drawings/*
-!drawings/.gitkeep
-workspace/*
-!workspace/.gitkeep
 autosave/
 .native/
+config/*
+!config/.gitkeep
