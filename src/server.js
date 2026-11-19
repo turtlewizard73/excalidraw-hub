@@ -103,7 +103,7 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
       return renderPng(store, project, file, { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack });
     };
     // A new file must not inherit Revert backups of a deleted drawing that had the same name.
-    const created = async (file) => { await backups.retire(project, file).catch(() => {}); return saved(file); };
+    const created = async (file) => { await backups.retire(`${project}/${file}`).catch(() => {}); return saved(file); };
     if (!versioned) {
       if (!isUsableLabel(label)) throw new HttpError(400, 'the label needs a letter or digit (a-z, 0-9) to use in the file name');
       const { file, overwrite } = plainSaveTarget(project, label, baseline.current?.folder === folder ? baseline.current : null);
@@ -118,7 +118,7 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
         // The old file goes to the backups first, for Revert. No backup, no overwrite.
         const old = await store.readBytes(project, file);
         if (old) {
-          try { await backups.save(project, file, old); } catch (e) { throw new HttpError(500, `${file} not overwritten: could not back up the old file (${e.message})`); }
+          try { await backups.save(`${project}/${file}`, old); } catch (e) { throw new HttpError(500, `${file} not overwritten: could not back up the old file (${e.message})`); }
         }
         await store.overwrite(project, file, doc);
         return saved(file);
@@ -154,7 +154,7 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
         const entry = { id: f.id, name: f.name, path: f.path, primary: f.primary, sync: !!f.git, projects: [] };
         try {
           entry.projects = await f.store.listProjects();
-          for (const p of entry.projects) for (const d of p.drawings) d.backups = await f.backups.count(p.name, d.file);
+          for (const p of entry.projects) for (const d of p.drawings) d.backups = await f.backups.count(`${p.name}/${d.file}`);
         } catch (e) { entry.error = `cannot read ${f.path}: ${e.code ?? e.message}`; }
         folders.push(entry);
       }
@@ -228,16 +228,16 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
           throw new HttpError(e.status, `Your unsaved changes could not be saved, so nothing was reverted. ${e.message}`);
         }
       }
-      const backup = await backups.newest(project, file);
+      const backup = await backups.newest(`${project}/${file}`);
       if (!backup) throw new HttpError(404, `${file} has no earlier version to revert to`);
       let doc;
       try { doc = JSON.parse(backup.bytes.toString('utf8')); } catch { throw new HttpError(422, `the backup ${backup.name} is not valid JSON`); }
       const current = await store.readBytes(project, file);
-      if (current) await backups.keepReverted(project, file, current);
+      if (current) await backups.keepReverted(`${project}/${file}`, current);
       await store.overwrite(project, file, backup.bytes);
-      await backups.remove(project, file, backup.name);
+      await backups.remove(`${project}/${file}`, backup.name);
       await loadOntoCanvas(folder, project, file, doc, await store.stamp(project, file));
-      return renderPng(store, project, file, { current: baseline.current, restored: backup.name, remaining: await backups.count(project, file) });
+      return renderPng(store, project, file, { current: baseline.current, restored: backup.name, remaining: await backups.count(`${project}/${file}`) });
     }),
 
     'POST /api/rename': serial(async ({ folder: folderId, project, file, newBase }) => {
@@ -246,7 +246,7 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
       const newFile = newBase + EXT;
       await store.rename(project, file, newFile);
       if (same(baseline.current, { folder, project, file })) baseline.current = { folder, project, file: newFile };
-      await backups.move(project, file, newFile).catch((e) => console.error('moving backups failed:', e.message));
+      await backups.move(`${project}/${file}`, `${project}/${newFile}`).catch((e) => console.error('moving backups failed:', e.message));
       return { folder, project, file: newFile, current: baseline.current };
     }),
 
@@ -255,7 +255,7 @@ export function createServer({ workspace = null, store: soleStore, canvas, backu
       const { id: folder, store, backups } = folderOf(folderId);
       await store.remove(project, file);
       if (same(baseline.current, { folder, project, file })) baseline.forget(); // keeps appState for the next save
-      await backups.retire(project, file).catch((e) => console.error('retiring backups failed:', e.message));
+      await backups.retire(`${project}/${file}`).catch((e) => console.error('retiring backups failed:', e.message));
       return { deleted: { folder, project, file }, current: baseline.current };
     }),
 

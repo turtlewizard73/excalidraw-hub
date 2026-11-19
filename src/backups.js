@@ -1,23 +1,31 @@
 // Copies of drawings taken before they are overwritten, for Revert. Outside the drawings folder, which may be git-tracked.
-// Layout: <root>/<project>/<base>/<timestamp>.excalidraw. Folders starting with "_" hold copies Revert never reads:
+// A drawing is named by its path relative to its root ("a/b/x.excalidraw"). Layout: <root>/<dir>/<base>/<timestamp>.excalidraw,
+// so a drawing's history follows the same folders. <root>/_reverted and <root>/_retired hold copies Revert never reads:
 // _reverted (the file a revert replaced) and _retired (backups of deleted drawings, or of a name created anew).
+// A drawing directly in a folder named _reverted or _retired of the drawings root has no backups (the name is reserved).
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { EXT, isSafeName } from './names.js';
+import { EXT } from './names.js';
+
+const RESERVED = new Set(['_reverted', '_retired']);
+const badSegment = (s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s);
 
 export function createBackups(dir, keep = 20) {
   const root = path.resolve(dir);
   const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 
-  function folder(project, file, area = '') {
-    const base = typeof file === 'string' && file.endsWith(EXT) ? file.slice(0, -EXT.length) : '';
-    if (!isSafeName(project) || !isSafeName(base)) throw new Error(`invalid backup name ${project}/${file}`);
-    return path.join(root, area, project, base);
+  /** The backups folder of drawing `rel` ("dir/x.excalidraw", POSIX), optionally in an area (_reverted, _retired). */
+  function folder(rel, area = '') {
+    const segs = typeof rel === 'string' ? rel.split('/') : [];
+    const file = segs.pop() ?? '';
+    if (!file.endsWith(EXT) || file === EXT || badSegment(file) || segs.some(badSegment)) throw new Error(`invalid backup name ${JSON.stringify(rel)}`);
+    if (!area && RESERVED.has(segs[0] ?? file.slice(0, -EXT.length))) throw new Error(`${segs[0] ?? file} is a reserved folder name for backups`);
+    return path.join(root, area, ...segs, file.slice(0, -EXT.length));
   }
   const exists = (p) => fs.lstat(p).then(() => true, () => false);
 
-  async function list(project, file) {
-    const names = await fs.readdir(folder(project, file)).catch((e) => { if (e.code === 'ENOENT') return []; throw e; });
+  async function list(rel) {
+    const names = await fs.readdir(folder(rel)).catch((e) => { if (e.code === 'ENOENT') return []; throw e; });
     return names.filter((n) => n.endsWith(EXT)).sort(); // timestamp names: oldest first
   }
 
@@ -35,10 +43,10 @@ export function createBackups(dir, keep = 20) {
   }
 
   /** Move a drawing's backups out of Revert's reach (into _retired). */
-  async function retire(project, file) {
-    const src = folder(project, file);
+  async function retire(rel) {
+    const src = folder(rel);
     if (!(await exists(src))) return;
-    const dest = folder(project, file, '_retired') + `-${stamp()}`;
+    const dest = folder(rel, '_retired') + `-${stamp()}`;
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.rename(src, dest);
   }
@@ -46,33 +54,37 @@ export function createBackups(dir, keep = 20) {
   return {
     root,
     list,
-    count: async (project, file) => (await list(project, file)).length,
+    count: async (rel) => (await list(rel)).length,
 
     /** Keep `bytes` (the file about to be overwritten). Returns the backup name. */
-    save: async (project, file, bytes) => write(folder(project, file), bytes, keep),
+    save: async (rel, bytes) => write(folder(rel), bytes, keep),
 
     /** Keep the file a revert is about to replace, where Revert never looks. */
-    keepReverted: async (project, file, bytes) => write(folder(project, file, '_reverted'), bytes, keep),
+    keepReverted: async (rel, bytes) => write(folder(rel, '_reverted'), bytes, keep),
 
     /** The newest backup, or null. Not removed: call remove() once it is restored. */
-    async newest(project, file) {
-      const names = await list(project, file);
+    async newest(rel) {
+      const names = await list(rel);
       if (!names.length) return null;
       const name = names.at(-1);
-      return { name, bytes: await fs.readFile(path.join(folder(project, file), name)) };
+      return { name, bytes: await fs.readFile(path.join(folder(rel), name)) };
     },
 
-    remove: async (project, file, name) => fs.unlink(path.join(folder(project, file), path.basename(name))),
+    remove: async (rel, name) => fs.unlink(path.join(folder(rel), path.basename(name))),
 
     retire,
 
-    /** Backups follow a renamed drawing. Anything already at the new name is retired first. */
-    async move(project, file, newFile) {
-      const src = folder(project, file);
+    /** Backups follow a renamed or moved drawing, also into another root's backups (`to`). Anything already at the new name is retired first. */
+    async move(rel, newRel, to = this) {
+      const src = folder(rel);
       if (!(await exists(src))) return;
-      await retire(project, newFile);
-      await fs.mkdir(path.dirname(folder(project, newFile)), { recursive: true });
-      await fs.rename(src, folder(project, newFile));
+      await to.retire(newRel);
+      const dest = to.folderOf(newRel);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.rename(src, dest);
     },
+
+    /** Where the backups of `rel` live (used by move). */
+    folderOf: (rel) => folder(rel),
   };
 }
