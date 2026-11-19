@@ -13,13 +13,12 @@ if (cfg.waitForMount) {
   if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it)`); process.exit(1); }
 }
 
-// TEMPORARY BRIDGE (step 1): workspace.js still requires a primary folder until step 2 removes it. FOLDERS_ROOT stands in, with no git sync.
-const workspace = await createWorkspace({ primary: { path: cfg.foldersRoot, git: null }, backupsDir: cfg.backupsDir, file: cfg.statePath, foldersRoot: cfg.foldersRoot });
+const workspace = await createWorkspace({ backupsDir: cfg.backupsDir, file: cfg.statePath, foldersRoot: cfg.foldersRoot, autoSyncBranches: cfg.autoSyncBranches });
 const server = createServer({
   workspace,
   canvas: createCanvas(cfg.canvasUrl),
   canvasPublicUrl: cfg.canvasPublicUrl,
   allowedHosts: cfg.allowedHosts,
 });
-server.listen(cfg.port, cfg.host, () => console.log(`excalidraw-hub on http://${cfg.host}:${cfg.port} (state ${cfg.statePath}, folders root ${cfg.foldersRoot}, backups ${cfg.backupsDir}, canvas ${cfg.canvasUrl})`));
+server.listen(cfg.port, cfg.host, () => console.log(`excalidraw-hub on http://${cfg.host}:${cfg.port} (state ${cfg.statePath}, ${workspace.folders().length} folder(s), folders root ${cfg.foldersRoot}, backups ${cfg.backupsDir}, canvas ${cfg.canvasUrl})`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => process.exit(0)));

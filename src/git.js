@@ -19,12 +19,14 @@ export function gitRunner(repoDir, timeout = 60000) {
   });
 }
 
-/** Whether `dir` is the top of a git work tree: {ok: true}, or {ok: false, reason}. Never throws. */
+/**
+ * The git work tree that contains `dir` (spec: repo detection): {ok: true, top} with top the real path of its top level,
+ * or {ok: false, reason}. Never throws. Not ok when git fails (not a repo, dubious ownership, ...) or the top is not visible to the hub.
+ */
 export async function repoTopLevel(dir, run = gitRunner(dir, 10000)) {
   let top;
-  try { top = (await run(['rev-parse', '--show-toplevel'])).trim(); } catch (e) { return { ok: false, reason: `${dir}: ${e.message}` }; } // git's own words (not a repo, dubious ownership, ...)
-  const [a, b] = await Promise.all([fs.realpath(top).catch(() => top), fs.realpath(dir).catch(() => dir)]);
-  return a === b ? { ok: true } : { ok: false, reason: `${dir} is inside the git repository ${top}, not its top level` };
+  try { top = (await run(['rev-parse', '--show-toplevel'])).trim(); } catch (e) { return { ok: false, reason: `${dir}: ${e.message}` }; } // git's own words
+  try { return { ok: true, top: await fs.realpath(top) }; } catch { return { ok: false, reason: `${dir} is in the git repository ${top}, which the hub cannot see` }; }
 }
 
 /** "<project> <names> diagram update": changed drawings without the `<project>_` prefix, at most 5. */

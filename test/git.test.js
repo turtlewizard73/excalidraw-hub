@@ -170,12 +170,10 @@ test('refuses a detached HEAD and a merge in progress, touching nothing', { skip
   assert.match(sh('status', '--porcelain'), /^UU README\.md$/m, 'conflict state untouched');
 });
 
-test('repoTopLevel: only the top of a work tree counts (a folder inside some repo, or no repo, gets no sync)', { skip: !hasGit }, async () => {
-  assert.deepEqual(await repoTopLevel(repo), { ok: true });
-  const inner = path.join(repo, 'docs', 'drawings');
-  const r = await repoTopLevel(inner);
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /inside the git repository .* not its top level/);
+test('repoTopLevel: the work tree containing a folder, or the reason (no repo)', { skip: !hasGit }, async () => {
+  const top = await fs.realpath(repo);
+  assert.deepEqual(await repoTopLevel(repo), { ok: true, top });
+  assert.deepEqual(await repoTopLevel(path.join(repo, 'docs', 'drawings')), { ok: true, top }, 'a folder inside the repo reports the repo top');
   const plain = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-nogit-'));
   assert.match((await repoTopLevel(plain)).reason, /not a git repository/);
   // A drawings folder that is the repo itself (HUB_DRAWINGS_SUBDIR=.) syncs with an empty drawings path.

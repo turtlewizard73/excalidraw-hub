@@ -1,17 +1,19 @@
-// The folders shown in the sidebar: the primary drawings folder (from the environment, with git sync) plus folders
-// the user attached, saved in a config file. Each folder has its own store and backups. Spec: docs/specs/2026-11-16-workspace-folders.md.
+// The folders shown in the sidebar: all attached by the user and equal (no primary), remembered in the state file.
+// Each root has its own store and backups, and git sync when it lies in a git repo. Spec: docs/specs/2026-11-19-standalone-workspace.md.
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createBackups } from './backups.js';
+import { createGit, gitRunner, repoTopLevel } from './git.js';
 import { createStore } from './store.js';
 
-export const PRIMARY = 'main';
+export const PRIMARY = 'main'; // TEMPORARY (until step 6): only fixedWorkspace below still uses it
 
 export class WorkspaceError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+const RECENT_MAX = 10;
 const idOf = (p) => `f-${crypto.createHash('sha256').update(p).digest('hex').slice(0, 12)}`;
 /** Sidebar label: the repo name for `<repo>/docs/drawings`, otherwise the folder's own name. */
 const labelOf = (p) => {
@@ -21,7 +23,7 @@ const labelOf = (p) => {
 };
 const inside = (root, p) => { const rel = path.relative(root, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 
-/** A workspace of one folder, for callers that pass store/backups/git directly. */
+/** TEMPORARY (until step 6): a workspace of one folder, for callers that pass store/backups/git directly. */
 export function fixedWorkspace({ store, backups, git = null }) {
   const folder = { id: PRIMARY, name: 'drawings', path: store.root, primary: true, store, backups, git };
   return {
@@ -34,35 +36,35 @@ export function fixedWorkspace({ store, backups, git = null }) {
 }
 
 /**
- * @param {{primary: {path: string, git?: object}, backupsDir: string, file?: string, foldersRoot?: string, log?: (s: string) => void}} opts
- * file: the config file (absent = nothing is saved). foldersRoot: attached folders must be inside it (absent = attaching off).
+ * @param {{backupsDir: string, foldersRoot: string, file?: string, autoSyncBranches?: string[], log?: (s: string) => void, repoTop?: Function}} opts
+ * foldersRoot: attached folders must be inside it. file: the state file (absent = nothing is saved).
+ * autoSyncBranches: branches where sync commits and pushes without asking. repoTop: repo detection, replaceable in tests.
  */
-export async function createWorkspace({ primary, backupsDir, file = null, foldersRoot = null, log = console.error }) {
-  const main = { id: PRIMARY, name: labelOf(path.resolve(primary.path)), path: path.resolve(primary.path), primary: true,
-    store: createStore(primary.path), backups: createBackups(backupsDir), git: primary.git ?? null };
-  const root = foldersRoot ? await fs.realpath(foldersRoot).catch(() => path.resolve(foldersRoot)) : null;
-  const attached = []; // in attach order
-  const make = (p) => ({ id: idOf(p), name: labelOf(p), path: p, primary: false, store: createStore(p),
-    backups: createBackups(path.join(backupsDir, '_folders', idOf(p))), git: null });
+export async function createWorkspace({ backupsDir, foldersRoot, file = null, autoSyncBranches = ['development', 'dev'], log = console.error, repoTop = repoTopLevel }) {
+  const root = await fs.realpath(foldersRoot).catch(() => path.resolve(foldersRoot));
+  const roots = []; // in attach order
+  let recent = [];
+  const gits = new Map(); // repo top -> its one git client (one queue per repo)
 
-  const mainStat = await fs.stat(main.path).catch(() => null);
-  const mainReal = await fs.realpath(main.path).catch(() => main.path);
+  /** Sync is on when the folder is inside a git work tree whose top level the hub can see; else off with git's reason. */
+  async function detect(p) {
+    const r = await repoTop(p);
+    if (!r.ok) return { git: null, repoDir: null, sync: false, syncError: r.reason };
+    if (!gits.has(r.top)) gits.set(r.top, createGit({ run: gitRunner(r.top), autoBranches: autoSyncBranches }));
+    return { git: gits.get(r.top), repoDir: r.top, sync: true };
+  }
+  const make = async (p) => ({ id: idOf(p), name: labelOf(p), path: p, store: createStore(p), backups: createBackups(path.join(backupsDir, idOf(p))), ...(await detect(p)) });
   const overlaps = (a, b) => inside(a, b) || inside(b, a);
 
   /** The real path of `p` if it may be attached, else a WorkspaceError. Used for attach and for every saved entry. */
   async function check(p) {
-    if (!root) throw new WorkspaceError(403, 'attaching folders is off (FOLDERS_ROOT not set)');
     if (typeof p !== 'string' || !path.isAbsolute(p.trim())) throw new WorkspaceError(400, `give an absolute path, e.g. /home/me/repo/docs/drawings (got ${JSON.stringify(p)})`);
     let real;
     try { real = await fs.realpath(p.trim()); } catch { throw new WorkspaceError(404, `${p.trim()} does not exist`); }
     const st = await fs.stat(real);
     if (!st.isDirectory()) throw new WorkspaceError(400, `${real} is not a folder`);
     if (!inside(root, real)) throw new WorkspaceError(403, `${real} is outside ${root}; only folders inside it can be attached (FOLDERS_ROOT)`);
-    // Same folder by identity, not path: under Docker the primary is /repo/docs/drawings and also visible under $HOME.
-    if ((mainStat && st.dev === mainStat.dev && st.ino === mainStat.ino) || overlaps(real, mainReal)) {
-      throw new WorkspaceError(409, `${real} is the primary drawings folder (or inside it, or contains it), already shown`);
-    }
-    const clash = attached.find((f) => overlaps(f.path, real));
+    const clash = roots.find((f) => overlaps(f.path, real));
     if (clash) throw new WorkspaceError(409, clash.path === real ? `${real} is already attached` : `${real} overlaps the attached folder ${clash.path}`);
     return real;
   }
@@ -74,19 +76,22 @@ export async function createWorkspace({ primary, backupsDir, file = null, folder
       if (e.code !== 'ENOENT') { unreadable = true; log(`workspace: cannot read ${file}: ${e.message}; attach and detach are refused until it is fixed`); }
     }
     if (raw !== null) {
-      let list = null;
-      try { const doc = JSON.parse(raw); if (Array.isArray(doc?.folders) && doc.folders.every((f) => typeof f === 'string')) list = doc.folders; } catch { /* below */ }
-      if (!list) {
-        log(`workspace: ${file} is not a valid workspace file; kept as ${file}.bad, starting with no attached folders`);
+      let doc = null;
+      try {
+        const d = JSON.parse(raw);
+        const strings = (a) => Array.isArray(a) && a.every((x) => typeof x === 'string');
+        if (d?.version === 2 && Array.isArray(d.folders) && d.folders.every((f) => typeof f?.path === 'string') && (d.recent === undefined || strings(d.recent))) doc = d;
+      } catch { /* below */ }
+      if (!doc) {
+        log(`workspace: ${file} is not a valid version 2 state file; kept as ${file}.bad, starting with no folders`);
         await fs.copyFile(file, `${file}.bad`).catch(() => {});
-      } else if (!root) {
-        if (list.length) log(`workspace: FOLDERS_ROOT not set, so the ${list.length} folder(s) in ${file} are not opened`);
       } else {
-        for (const p of list) {
-          try { attached.push(make(await check(p))); } catch (e) {
+        recent = (doc.recent ?? []).slice(0, RECENT_MAX);
+        for (const { path: p } of doc.folders) {
+          try { roots.push(await make(await check(p))); } catch (e) {
             // Missing now (unmounted, deleted): keep it listed with its error so it can be detached. Anything else is dropped.
-            const normal = typeof p === 'string' && path.isAbsolute(p) ? path.normalize(p) : null;
-            if (e.status === 404 && normal && inside(root, normal) && !attached.some((f) => overlaps(f.path, normal))) attached.push(make(normal));
+            const normal = path.isAbsolute(p) ? path.normalize(p) : null;
+            if (e.status === 404 && normal && inside(root, normal) && !roots.some((f) => overlaps(f.path, normal))) roots.push(await make(normal));
             else log(`workspace: not opening ${JSON.stringify(p)} from ${file}: ${e.message}`);
           }
         }
@@ -101,7 +106,7 @@ export async function createWorkspace({ primary, backupsDir, file = null, folder
     const tmp = `${file}.${crypto.randomUUID()}.tmp`;
     try {
       const h = await fs.open(tmp, 'wx');
-      try { await h.writeFile(JSON.stringify({ version: 1, folders: attached.map((f) => f.path) }, null, 2) + '\n'); await h.sync(); } finally { await h.close(); }
+      try { await h.writeFile(JSON.stringify({ version: 2, folders: roots.map((f) => ({ path: f.path })), recent }, null, 2) + '\n'); await h.sync(); } finally { await h.close(); }
       await fs.rename(tmp, file);
     } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
   }
@@ -111,29 +116,33 @@ export async function createWorkspace({ primary, backupsDir, file = null, folder
   const oneAtATime = (fn) => { const r = lane.then(fn); lane = r.catch(() => {}); return r; };
 
   return {
-    canAttach: !!root,
-    folders: () => [main, ...attached],
-    get(id = PRIMARY) {
-      const f = id === PRIMARY ? main : attached.find((x) => x.id === id);
+    canAttach: true,
+    folders: () => [...roots],
+    recent: () => [...recent],
+    get(id) {
+      const f = roots.find((x) => x.id === id);
       if (!f) throw new WorkspaceError(404, `unknown folder: ${JSON.stringify(id)} (detached? reload the page)`);
       return f;
     },
 
     /** Add a folder by absolute path. Returns it. */
     attach: (p) => oneAtATime(async () => {
-      const f = make(await check(p));
-      attached.push(f);
-      try { await persist(); } catch (e) { attached.pop(); throw new WorkspaceError(500, `could not save the workspace file: ${e.message}`); }
+      const f = await make(await check(p));
+      const before = recent;
+      roots.push(f);
+      recent = recent.filter((r) => r !== f.path);
+      try { await persist(); } catch (e) { roots.pop(); recent = before; throw new WorkspaceError(500, `could not save the state file: ${e.message}`); }
       return f;
     }),
 
-    /** Remove a folder from the workspace. Files on disk are not touched. */
+    /** Remove a folder from the workspace and remember its path in `recent`. Files on disk are not touched. */
     detach: (id) => oneAtATime(async () => {
-      if (id === PRIMARY) throw new WorkspaceError(400, 'the primary folder cannot be detached');
-      const i = attached.findIndex((f) => f.id === id);
+      const i = roots.findIndex((f) => f.id === id);
       if (i < 0) throw new WorkspaceError(404, `unknown folder: ${JSON.stringify(id)}`);
-      const [f] = attached.splice(i, 1);
-      try { await persist(); } catch (e) { attached.splice(i, 0, f); throw new WorkspaceError(500, `could not save the workspace file: ${e.message}`); }
+      const before = recent;
+      const [f] = roots.splice(i, 1);
+      recent = [f.path, ...recent.filter((r) => r !== f.path)].slice(0, RECENT_MAX);
+      try { await persist(); } catch (e) { roots.splice(i, 0, f); recent = before; throw new WorkspaceError(500, `could not save the state file: ${e.message}`); }
       return f;
     }),
   };

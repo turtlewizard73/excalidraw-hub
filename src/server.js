@@ -34,7 +34,7 @@ async function readJson(req) {
  */
 export function createServer({ workspace = null, store: soleStore, canvas, backups: soleBackups, git: soleGit = null, canvasPublicUrl, allowedHosts }) {
   workspace ??= fixedWorkspace({ store: soleStore, backups: soleBackups, git: soleGit });
-  const primaryGit = workspace.get(PRIMARY).git;
+  const primaryGit = workspace.folders().find((f) => f.primary)?.git ?? null; // TEMPORARY (until step 6)
   /** The folder a request names (default: the primary one). */
   const folderOf = (id) => {
     if (id !== undefined && typeof id !== 'string') throw new HttpError(400, 'folder must be a string');
