@@ -101,7 +101,7 @@ Steps 0–13 and 15 are done on `feat/standalone-workspace`. Step 14 (the mainta
 - the e2e harness on a v2 `HUB_STATE`;
 - compose and `native.sh` ports, `scripts/mcp.sh`, neutral fixtures, the README and screenshots.
 
-Final gates on the branch: unit 141/141 in Docker, `scripts/e2e.sh` 28 + 1 (the restart phase) passed, and `git grep -inE '<parent name>|<home path>'` empty, including commit messages.
+Final gates on the branch: unit 146/146 in Docker, `scripts/e2e.sh` 28 + 1 (the restart phase) passed, and `git grep -inE '<parent name>|<home path>'` empty, including commit messages.
 
 **Differences from the plan.**
 - **E2e gate.** E2e was red from step 1 to step 8: dropping the old env vars and the primary folder broke the harness, and the spec forbids compatibility shims. The unit tests were green at every commit. Red commits stayed local until step 8.
@@ -113,6 +113,11 @@ Final gates on the branch: unit 141/141 in Docker, `scripts/e2e.sh` 28 + 1 (the 
   - `--literal-pathspecs` is used for file names taken from `git status`;
   - dot-folder targets are refused;
   - the "checkout not updated" note is shown on every sync result.
+- **Second review** of the review fixes (`bee2ddf..` on src, test, e2e, public). It found:
+  - a `_retired` rename collision within the same millisecond, now fixed with a `_2` loop;
+  - reserved top-level `_retired`/`_reverted` folders breaking the tree listing: they now report 0 backups, and a move into one is refused;
+  - directories counted as backups: only regular files count now;
+  - literal pathspecs missing in the drawings-only-push fallback, now added.
 - **Not fixed (decided):** a state entry that is missing at start is not re-validated when it reappears. This needs write access inside `FOLDERS_ROOT`, and only the folder list is at stake.
 - **Smaller changes:**
   - The restart e2e runs as a second phase after `docker compose restart hub`.
