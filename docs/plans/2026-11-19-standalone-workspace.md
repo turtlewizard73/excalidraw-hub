@@ -14,15 +14,15 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
    - Repo detection per root through `repoTopLevel`, with one git client and one queue per repo top level.
    - `recent` is updated on detach.
    - Tests rewritten: no primary; recent; repo vs non-repo roots; a root inside another root's repo.
-3. **Paths and naming** (starts only after the user confirms the naming rule; see the spec's Decisions) (`src/names.js`, `src/store.js`).
+3. **Paths and naming** (rule confirmed 2026-11-19: families by stem per folder) (`src/names.js`, `src/store.js`).
    - `resolve(root, rel)` checks: inside the root, no `..`, real path inside the root.
-   - The stem is the parent folder name; `latest` per folder.
+   - Families by stem per folder; the folder name is the default stem for new drawings; `latest` per stem.
    - Save, save-version and plain-save targets take a directory.
    - `mkdir`; `move` with the `.png`, the backups folder and the `EXDEV` fallback.
    - Tests: depth 0 / 1 / 3, symlink escape, unsafe folder name refused, move clash, move across roots, `EXDEV` (simulated through an injected rename).
 4. **Tree listing** (`src/tree.js`). `list(root, rel)` returns dirs (skipping dot-dirs, `node_modules` and git-ignored dirs through one `git check-ignore --stdin` call when the root is in a repo) and `.excalidraw` drawings with version info and backup counts. Tests with a temp git repo.
 5. **Sync** (`src/git.js`).
-   - Current branch and its upstream; `SYNC_BRANCH` removed.
+   - Current branch and its upstream; `SYNC_BRANCH` removed; auto-commit only on `HUB_AUTO_SYNC_BRANCHES` (default `development,dev`), `needsConfirm: 'branch'` elsewhere.
    - Fetch, then `merge --ff-only` when strictly behind, before the commit.
    - Pathspec limited to `:(glob)<F>/**/*.excalidraw` and `:(glob)<F>/**/*.png`, plus the same two directly under F.
    - Plain push when exactly our commit is ahead, otherwise `pushDrawingsOnly`; no upstream means a local commit only.
@@ -72,7 +72,14 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
     - `docker compose up -d --build`, then verify the drawings are listed, Revert history is there, and ⟳ works.
     - Parent repo: `.mcp.json` points to the hub's `scripts/mcp.sh` and the old per-session `docker run` script is deleted; then restart the sessions and check that `docker ps` shows no `mcp_excalidraw` containers.
     - Update the parent's docs that mention the sync button's direct commits and the hub's setup.
-15. **Outcome** section here; the earlier `feat/standalone` branch is closed as superseded (it is included in this branch).
+15. **History rewrite** (spec, "History rewrite"). After the squash merge and the cutover:
+    - bundle backup;
+    - `git-filter-repo` on a mirror;
+    - gate greps;
+    - then delete and recreate the GitHub repo or force-push, whichever the user chose;
+    - set `development` as the default branch;
+    - re-clone the parent's submodule checkout and bump the submodule.
+16. **Outcome** section here; the earlier `feat/standalone` branch is closed as superseded (it is included in this branch).
 
 ## Risks
 - The tree with drag and drop is the largest UI change so far for a no-build page, so `app.js` might outgrow one file. If it passes about 500 lines, split the explorer into `public/explorer.js` (an ES module, still no build step).

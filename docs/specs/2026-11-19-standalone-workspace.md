@@ -11,7 +11,6 @@ Anyone can clone the hub from GitHub, follow the README alone, and run it native
 The hub knows nothing about any parent repo. A personal setup is just one state file that lists its folders.
 
 ## Not building
-- **History rewrite.** Old commits still name the former parent repo and hold personal fixture drawings. Rewriting public history is the user's call; this spec only cleans the current tree.
 - **Remote or multi-user hosting.** There is no auth, so both runtimes bind to loopback. Exposing the hub on a LAN is out of scope; `HUB_HOST` stays undocumented as a debug override.
 - **A server-side folder picker dialog.** The browser cannot hand a local path to the server, so the path is typed. Recently detached folders are offered back in the prompt.
 - **Moving folders.** Drag and drop moves drawings only. Folders are created in the explorer, not moved.
@@ -69,13 +68,16 @@ flowchart LR
 - **Hide.** A ☰ button in the header toggles the sidebar, as does `Ctrl+B` while focus is on the hub page; keys typed inside the canvas iframe go to the canvas. When hidden, the sidebar collapses to the button.
 
 ## Naming at any depth
-- A drawing's **name stem is its own (parent) folder's name**, at any depth: `<dir>/<dirname>_v<i>[_<label>].excalidraw`. There is no "project = top-level folder" rule any more.
-- **Latest.** Within one folder, the file with the highest `<dirname>_v<i>` is marked "latest". Files that don't match are "unversioned" but are still listed, loadable and saveable (today's rule, applied per folder).
-- **Save** into the selected folder D:
-  - With no label and a drawing from D loaded, it overwrites that drawing (unchanged safety checks).
-  - Otherwise it writes `<basename D>[_<label>].excalidraw` and refuses if that file exists.
-- **Save new version** writes `<basename D>_v<next>[_<label>]` and never overwrites.
-- **Unsafe folder names.** If D's name is not a safe name (`isSafeName`: letters, digits, `._-`), saving there is refused with "rename the folder or pick another". Loading from it still works.
+Any folder at any depth can hold drawings. There is no "project = top-level folder" rule any more. Confirmed by the user on 2026-11-19 (option b).
+
+- **Families.** Within one folder, the files `<stem>_v<i>[_<label>].excalidraw` with the same stem form one family. The stem is parsed lazily: `^(.+?)_v(\d{1,9})(?:_(.+))?$`.
+- **Latest.** The highest `i` per stem is marked "latest". A folder can hold several families. Files without `_v<i>` are "unversioned" and are still listed, loadable and saveable.
+- **The folder name is only the default stem for new drawings.** Saving with nothing loaded into the selected folder D uses `<basename D>`.
+- **Save:**
+  - With no label and a drawing loaded from D, it overwrites that drawing (unchanged safety checks).
+  - Otherwise it writes `<stem>[_<label>].excalidraw` and refuses if that file exists. The stem is the loaded drawing's stem, or `<basename D>` when nothing is loaded or the loaded drawing is in another folder.
+- **Save new version** writes `<stem>_v<next>[_<label>]` into D and never overwrites. The stem comes from the same rule. For an unversioned loaded drawing, its whole base name is the stem.
+- **Unsafe stems.** If the stem would not be a safe name (`isSafeName`: letters, digits, `._-`), the save is refused with "pick a label-free name: rename the folder or the drawing". Loading still works.
 - **Autosave on load when nothing was loaded** goes to `tmp/tmp_v<n>` inside the root of the drawing being loaded (today: the primary's `tmp/`).
 - **PNG: unchanged.** Every save writes `<name>.png` next to the drawing. A rename, move or delete carries the `.png` along.
 - The naming scheme is documented in the README, its only home.
@@ -87,7 +89,7 @@ flowchart LR
 3. Move that drawing's backups folder to the new place, so Revert history follows the drawing.
 4. If the moved file is the loaded drawing, update `current`.
 
-- The file name is kept, as in VS Code. A drawing moved into a folder with a different name therefore shows as "unversioned" until it is renamed; the move message says so.
+- The file name is kept, as in VS Code. Families are per folder and per stem, so a moved drawing joins or starts the family of its stem in the target folder. Moving `a_v3` into a folder that already has `a_v5` gives "latest" to `a_v5`.
 - Moves run in the hub's serial queue, like every other file operation.
 
 ## Sync (⟳ on any folder of a repo root)
@@ -108,7 +110,10 @@ flowchart TD
   P -->|"no: other unpushed commits, or remote moved meanwhile"| Q["drawings-only push (pushDrawingsOnly); other commits stay local; message: run git pull --rebase when ready"]
 ```
 
-- **Branch.** Sync uses whatever branch the checkout is on and pushes to that branch's upstream. `SYNC_BRANCH` is gone, and with it the "not on the sync branch" confirm: if a checkout is on a feat branch, ⟳ commits and pushes there without asking. Optional guard (pending the user's choice): a per-folder `"branch"` pin in the state file; when set and the checkout is on another branch, ⟳ asks first, as today. The user's rule: other sessions keep their own branches and rebase later; drawings are almost never touched on those branches.
+- **Branch.** Sync uses whatever branch the checkout is on and pushes to that branch's upstream. `SYNC_BRANCH` is gone.
+  - `HUB_AUTO_SYNC_BRANCHES` in `.env` (comma-separated, default `development,dev`) lists the branches where ⟳ commits and pushes without asking.
+  - On any other branch, ⟳ first asks "Commit and push `<F>` on branch `<b>`?". This is today's confirm, generalized; the user chose it on 2026-11-19.
+  - The user's rule: other sessions keep their own branches and rebase later; drawings are almost never touched on those branches.
 - **Scope.** Only `*.excalidraw` and `*.png` under the clicked folder are staged. Today the whole folder is staged; this is narrowed because the explorer shows nothing else, so nothing invisible gets committed.
 - **Updating the local checkout.** Fetch first. If the checkout is strictly behind its upstream, `git merge --ff-only @{u}` brings it up to date before the commit, so the commit then goes up as a plain push and no manual pull is needed. If git refuses (for example, local edits would be overwritten), sync still commits and sends only the drawings commit up (`pushDrawingsOnly`), and the message says the checkout was not updated and why. A failed pull never blocks saving the drawings to the remote. With unpushed commits of its own, the checkout is left as is and only the drawings commit goes up (today's `pushDrawingsOnly`). The same happens when the remote moved between the fetch and the push. Rebase and autostash are never used: they would rewrite commits or move a branch under another session.
 - **Error handling, queueing, timeouts, no prompts (`BatchMode`) and the cherry-pick conflict rule** stay as in the current `git.js`.
@@ -150,6 +155,19 @@ flowchart TD
   - Limits.
   - Screenshots regenerated by `scripts/screenshots.sh`.
 
+## History rewrite (user's decision 2026-11-19)
+The public history holds the maintainer's real drawings, including a photo, in `fixtures/` (11 paths, listed by `git log --all --name-only -- fixtures`), plus 19 commits whose diffs and 1 commit message name the former parent repo, and 1 commit with a personal home path.
+- **Tool:** [git-filter-repo](https://github.com/newren/git-filter-repo), the tool the git project recommends over `filter-branch`, run with `uvx git-filter-repo`.
+  - `--invert-paths` with every old fixture path.
+  - `--replace-text` and `--replace-message` with one expressions file: the parent repo's name becomes `parent repo`, and the maintainer's home path becomes `/home/me`.
+- **Order:** last, after the branch is squash-merged into `development`, so one rewrite covers everything. Run it on a fresh `--mirror` clone. Keep a bundle of the pre-rewrite repo outside the repo (`git bundle create`) for rollback.
+- **Gate before publishing:** in the rewritten mirror, `git log --all -p | grep -ci <parent name>` and the home path both print 0, and no old fixture path exists in any commit.
+- **Why a force-push is not enough:** GitHub keeps `refs/pull/<n>/head` for PRs #1–#4, and those cannot be deleted, so the old commits, including the photo, stay reachable by SHA. A complete purge means deleting and recreating the GitHub repo (0 stars, 0 forks on 2026-11-19; the 4 PR pages are lost), then pushing the rewritten `development` and setting it as default. Pending the user's choice: delete and recreate, or force-push only.
+- **Side effects:**
+  - Every SHA changes. Old parent-repo commits pin hub SHAs that will no longer exist on GitHub, so checking out an old parent commit no longer finds its hub commit. Only the new bump commit works.
+  - Other clones and worktrees of the hub must be re-cloned. Today that means the parent's submodule checkout and this worktree.
+  - The `canvas/` subtree history is rewritten too. Later `git subtree pull` keeps working because it uses `--squash`.
+
 ## API (all drawing routes)
 - A drawing is identified by `{root, path}`, where `path` is relative to the root (POSIX separators). `current` becomes `{root, path}`.
 - Every path is resolved inside its root, and its real path must stay inside the root (no `..`, no symlink escape). Unsafe paths are refused with 400.
@@ -184,8 +202,9 @@ flowchart TD
 | State file JSON, own code, no config library | It holds one list plus `recent`; `JSON.parse` and an atomic rename are enough (existing ~40 lines). |
 | View state in `localStorage` | It is per browser, changes on every drag, and needs no server writes; VS Code keeps layout per window the same way. |
 | Lazy tree listing per expanded folder | A repo root can be large (`node_modules`); listing only what is open scales with what is visible. |
-| Stem = parent folder name at any depth (**to confirm**: alternative is "any `<stem>_v<i>` is versioned per stem, the folder name is only the default for new saves") | User's answer 2026-11-19: "the root folder of any excalidraw file is the project … that's where it gets its name". Blocks plan step 3. |
+| Families by stem per folder; folder name is only the default stem | User's answer 2026-11-19 (option b), after being shown both readings. |
 | Keep the file name on move | VS Code behaviour; a silent rename would surprise. The user can rename afterwards. |
+| Auto-sync only on `HUB_AUTO_SYNC_BRANCHES` (default `development,dev`), ask elsewhere | User's answer 2026-11-19. It sits in `.env` because the user sets it, not the UI. |
 | Sync on the current branch, ff-only update, never rebase | User's answer 2026-11-19: commit in the local checkout and push; other sessions keep their branches. Rebase or autostash would rewrite commits or move a branch under another session. |
 | Stage only `*.excalidraw` and `*.png` | The explorer shows only drawings; committing files the user cannot see would be a surprise. |
 | PNG on every save, unchanged | User's answer 2026-11-19: keep as is. |
