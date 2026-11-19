@@ -72,7 +72,12 @@ Each step ends green: unit tests (Docker command in the README, or `npm test` wi
     - Snapshot the canvas, then `docker compose down` in the submodule.
     - After the hub PR is squash-merged into hub `development`, bump the submodule.
     - In the submodule: `.env` with the old ports, `config/hub.json` listing the parent repo's drawings folder.
-    - Move `backups/<project>/` to `backups/<id>/<project>/` and `backups/_folders/<id>/` to `backups/<id>/`.
+    - Migrate backups to the final layout (see Outcome). `<id>` is `f-` plus the first 12 hex chars of sha256 of the drawings folder's real path. Old → new, in the deployed checkout's `backups/`:
+      - `<project>/<base>/` → `<id>/<project>/<base>.excalidraw/`;
+      - `_reverted/<project>/<base>/` → `<id>/_reverted/<project>/<base>.excalidraw/`;
+      - `_retired/<project>/<base>-<stamp>/` → `<id>/_retired/<project>/<base>.excalidraw-<stamp>/`;
+      - then remove the empty old folders. The deployed checkout has no `_folders/` (nothing else was attached).
+      - Rehearsed on a copy on 2026-11-19: the new hub listed `backups: 2` for the migrated drawing.
     - `docker compose up -d --build`, then verify the drawings are listed, Revert history is there, and ⟳ works.
     - Parent repo: `.mcp.json` points to the hub's `scripts/mcp.sh` and the old per-session `docker run` script is deleted; then restart the sessions and check that `docker ps` shows no `mcp_excalidraw` containers.
     - Update the parent's docs that mention the sync button's direct commits and the hub's setup.
