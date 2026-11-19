@@ -31,7 +31,7 @@ Made-up demo data in the screenshots, regenerated with `scripts/screenshots.sh`.
 ## Install
 Pick one way. Both use the same two ports (hub 3080, canvas 3000, changeable under [Configure](#configure)), so run only one at a time. The ports must be free. Everything below is run from the clone:
 ```bash
-git clone <this repo's URL> excalidraw-hub
+git clone https://github.com/turtlewizard73/excalidraw-hub.git
 cd excalidraw-hub
 ```
 
