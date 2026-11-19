@@ -1,13 +1,17 @@
 # Plan: standalone hub with a VS Code-style workspace
 
 Spec: `docs/specs/2026-11-19-standalone-workspace.md`.
-- Branch: `feat/standalone-workspace`, based on `origin/feat/standalone` (a24bc4b, itself on `development` 39d30bc).
-- Worktree: `/home/me/excalidraw-hub-standalone`.
-- The running hub (`:3000` / `:3080`, the parent repo's submodule checkout on `development`) is not touched until the cutover in step 12.
+- Branch: `feat/standalone-workspace`, on the rewritten `development` (`715dd13`).
+- The running hub (`:3000` / `:3080`, the parent repo's submodule checkout on `development`) is not touched until the cutover in step 14.
 
-Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native scripts/e2e.sh`. Commit after each step.
+Each step ends green: unit tests (Docker command in the README, or `npm test` with Node 20+), and from step 0 on also `scripts/e2e.sh`. Commit after each step.
 
-1. **Config** (`src/config.js`). Every env var is read in one place with its default (`HUB_PORT`, `CANVAS_PORT`, `CANVAS_URL`, `CANVAS_PUBLIC_URL`, `FOLDERS_ROOT`, `HUB_STATE`, `BACKUPS_DIR`, `HUB_WAIT_FOR_MOUNT`, `HUB_ALLOWED_HOSTS`). `main.js` uses only this module. Drop the removed vars. Unit test: defaults and overrides.
+0. **Made-up fixtures.** The history rewrite removed the personal drawings, leaving only `fixtures/image-test/`.
+   - Create synthetic drawings under the file names the e2e specs use (`budgeting/budgeting_v0_plan.excalidraw`, `budgeting/budgeting_v1_plan_with_proposal.excalidraw`, and every other name `e2e/*.js` and `scripts/` load). Use neutral content, made-up shapes and text.
+   - Add one nested case for later steps: `nested/deep/deep_v0.excalidraw`.
+   - Run e2e until green against the unchanged code.
+   - Renaming the fixtures to neutral names is allowed in step 11.
+1. **Config** (`src/config.js`). Every env var is read in one place with its default (`HUB_PORT`, `CANVAS_PORT`, `CANVAS_URL`, `CANVAS_PUBLIC_URL`, `FOLDERS_ROOT`, `HUB_STATE`, `BACKUPS_DIR`, `HUB_AUTO_SYNC_BRANCHES`, `HUB_WAIT_FOR_MOUNT`, `HUB_ALLOWED_HOSTS`). `main.js` uses only this module. Drop the removed vars. Unit test: defaults and overrides.
 2. **Workspace without a primary** (`src/workspace.js`).
    - The state file is v2 (`folders`, `recent`); a v1 file is treated as invalid and moved to `.bad`.
    - All roots are equal; zero roots is valid; backups go to `BACKUPS_DIR/<id>/`.
@@ -56,7 +60,7 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
     - README rewritten per the spec; `docs/setup.md` trimmed to what the README does not cover; screenshots regenerated.
     - Gate: `git grep -i <former parent name>` prints nothing, and `git grep -n '/home/'` prints only documented examples like `/home/me`.
 12. **Install check (independent).**
-    - A fresh subagent does `git clone /home/me/excalidraw-hub-standalone sandbox/tmp/hub-install/excalidraw-hub` at the parent repo root (a local clone, so nothing is pushed first) and checks out the branch.
+    - A fresh subagent clones the pushed branch (`git clone -b feat/standalone-workspace <GitHub URL>`) into an ignored scratch folder of the parent repo.
     - It follows only the README, without reading `src/`.
     - It runs the native path on ports 3280/3200, then Docker on 3380/3300, because the real hub holds 3000/3080.
     - It attaches a scratch folder, saves, confirms the PNG, moves a drawing, and runs sync against a throwaway bare repo.
@@ -72,14 +76,8 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
     - `docker compose up -d --build`, then verify the drawings are listed, Revert history is there, and ⟳ works.
     - Parent repo: `.mcp.json` points to the hub's `scripts/mcp.sh` and the old per-session `docker run` script is deleted; then restart the sessions and check that `docker ps` shows no `mcp_excalidraw` containers.
     - Update the parent's docs that mention the sync button's direct commits and the hub's setup.
-15. **History rewrite** (spec, "History rewrite"). After the squash merge and the cutover:
-    - bundle backup;
-    - `git-filter-repo` on a mirror;
-    - gate greps;
-    - then delete and recreate the GitHub repo or force-push, whichever the user chose;
-    - set `development` as the default branch;
-    - re-clone the parent's submodule checkout and bump the submodule.
-16. **Outcome** section here; the earlier `feat/standalone` branch is closed as superseded (it is included in this branch).
+15. **History rewrite:** done 2026-11-19, before implementation (see the spec). Nothing left to do.
+16. **Outcome** section here.
 
 ## Risks
 - The tree with drag and drop is the largest UI change so far for a no-build page, so `app.js` might outgrow one file. If it passes about 500 lines, split the explorer into `public/explorer.js` (an ES module, still no build step).
