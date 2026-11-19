@@ -20,6 +20,22 @@ export function gitRunner(repoDir, timeout = 60000) {
 }
 
 /**
+ * Which of `paths` (relative to `repoDir`; give directories a trailing slash) git ignores, in one `check-ignore --stdin` call.
+ * Never throws: if git fails, nothing counts as ignored.
+ */
+export function gitIgnored(repoDir, paths, timeout = 10000) {
+  if (!paths.length) return Promise.resolve(new Set());
+  return new Promise((resolve) => {
+    const child = execFile('git', ['-C', repoDir, 'check-ignore', '-z', '--stdin'], { timeout, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => {
+      // exit 1 = nothing ignored; anything else (not a repo, timeout) is treated the same
+      resolve(err ? new Set() : new Set(stdout.split('\0').filter(Boolean)));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(paths.join('\0') + '\0');
+  });
+}
+
+/**
  * The git work tree that contains `dir` (spec: repo detection): {ok: true, top} with top the real path of its top level,
  * or {ok: false, reason}. Never throws. Not ok when git fails (not a repo, dubious ownership, ...) or the top is not visible to the hub.
  */
