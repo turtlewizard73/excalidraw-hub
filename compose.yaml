@@ -49,7 +49,7 @@ services:
       CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:${CANVAS_PORT:-3000}}"   # browser -> canvas iframe
       HOME: /home/node
       FOLDERS_ROOT: "${FOLDERS_ROOT:-${HOME}}"   # only folders inside it can be attached (mounted below)
-      HUB_STATE: /config/hub.json   # attached folders; ./config on the host, shared with scripts/native.sh
+      HUB_STATE: "${HUB_STATE:-/config/hub.json}"   # default = ./config/hub.json on the host (mounted below); a set path must lie inside FOLDERS_ROOT
       BACKUPS_DIR: /backups
       HUB_AUTO_SYNC_BRANCHES: "${HUB_AUTO_SYNC_BRANCHES:-development,dev}"
     volumes:
