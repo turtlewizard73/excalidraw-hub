@@ -1,72 +1,112 @@
-// End-to-end: attach a second folder of projects, load and save there, detach. Runs after hub.spec.js.
+// End-to-end: attach a second folder, load and save there, drag a drawing across roots (png and Revert history follow),
+// detach, attach again from the recent list. Runs after hub.spec.js. Leaves the second folder attached for restart.spec.js.
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { act, BACKUPS, DATA, drawing, drawRectangle, exists, folder, hubPage, loadDrawing, open, readDoc, rootId } from './helpers.js';
 
-const EXTRA = process.env.EXTRA_DIR; // FOLDERS_ROOT of the test hub; holds other-repo/docs/drawings
-const OTHER = path.join(EXTRA, 'other-repo', 'docs', 'drawings');
-const CANVAS = process.env.CANVAS_URL;
-const canvasCount = async () => (await (await fetch(`${CANVAS}/api/elements`)).json()).elements.filter((e) => !e.isDeleted).length;
-const otherDoc = () => JSON.parse(fs.readFileSync(path.join(OTHER, 'notes', 'notes_v0.excalidraw'), 'utf8'));
+const OTHER = path.join(process.env.EXTRA_DIR, 'other-repo', 'docs', 'drawings');
+const NOTE = 'notes/notes_v0.excalidraw';
 
 test.describe.configure({ mode: 'serial' });
-let page;
+let page, main, other;
 
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
-  await page.goto('/');
-  await expect(page.frameLocator('#canvas').getByText('Connected', { exact: true })).toBeVisible({ timeout: 20000 });
+  page = await hubPage(browser);
+  main = await rootId();
 });
 test.afterAll(async () => { await page.close(); });
 
-test('attach: a second section, named after the repo, without sync', async () => {
-  await expect(page.locator('section[data-folder]')).toHaveCount(1);
-  await expect(page.getByTestId('save-folder')).toBeHidden();
-  page.once('dialog', (d) => d.accept(OTHER));
+const attach = async (answer) => {
+  let prompted = '';
+  page.once('dialog', (d) => { prompted = d.message(); d.accept(answer); });
   await page.getByTestId('add-folder').click();
-  await expect(page.locator('section[data-folder]')).toHaveCount(2);
-  const other = page.locator('section[data-folder]').nth(1);
-  await expect(other.locator('h2 .name')).toHaveText('other-repo');
-  await expect(other.locator('h2')).toHaveAttribute('title', OTHER);
-  await expect(other.locator('details[data-project="notes"] li')).toHaveCount(1);
-  await expect(other.locator('[data-action="sync"]')).toHaveCount(0);
-  await expect(page.getByTestId('save-folder')).toBeVisible();
+  await expect.poll(() => prompted).not.toBe('');
+  return prompted;
+};
+const roots = () => page.locator('[data-testid="folder"][data-path=""]');
+
+test('attach: a second root named after the repo, opened, without sync', async () => {
+  await expect(roots()).toHaveCount(1);
+  expect(await attach(OTHER)).not.toContain('Recently');
+  await expect(roots()).toHaveCount(2);
+  other = await rootId(OTHER);
+  expect(other).toMatch(/^f-[0-9a-f]{12}$/);
+  await expect(folder(page, other)).toContainText('other-repo');
+  await expect(folder(page, other)).toHaveAttribute('title', new RegExp(OTHER));
+  await expect(folder(page, other)).toHaveAttribute('data-expanded', 'true');
+  await open(page, other, 'notes');
+  await expect(drawing(page, other, NOTE)).toBeVisible();
+  await expect(page.locator(`[data-root="${other}"] [data-action="sync"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-root="${main}"] [data-action="sync"]`).first()).toHaveCount(1);
 });
 
 test('load and save in the attached folder write its files', async () => {
-  const other = page.locator('section[data-folder]').nth(1);
-  await other.locator('li[data-file="notes_v0.excalidraw"] button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('other-repo: notes / notes_v0.excalidraw');
-  await expect(page.getByTestId('save-project')).toHaveValue('notes');
-  const before = otherDoc().elements.length;
-  const frame = page.frameLocator('#canvas');
-  const n = await canvasCount();
-  await frame.locator('[data-testid="toolbar-rectangle"]').click({ force: true });
-  const box = await page.locator('#canvas').boundingBox();
-  await page.mouse.move(box.x + box.width - 260, box.y + box.height - 220);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 120, box.y + box.height - 100, { steps: 8 });
-  await page.mouse.up();
-  await frame.locator('[data-testid="toolbar-selection"]').click({ force: true });
-  await expect.poll(canvasCount, { timeout: 10000 }).toBe(n + 1);
+  await loadDrawing(page, other, NOTE);
+  await expect(page.getByTestId('current')).toHaveText('other-repo / notes / notes_v0.excalidraw');
+  await expect(page.getByTestId('save-target')).toHaveText('Save into other-repo / notes');
+  const before = readDoc(NOTE, OTHER).elements.length;
+  await drawRectangle(page);
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved other-repo: notes/notes_v0.excalidraw and its .png');
-  expect(otherDoc().elements.length).toBe(before + 1);
-  expect(fs.existsSync(path.join(OTHER, 'notes', 'notes_v0.png'))).toBe(true);
+  await expect(page.getByTestId('message')).toHaveText('Saved other-repo/notes/notes_v0.excalidraw and its .png');
+  expect(readDoc(NOTE, OTHER).elements.length).toBe(before + 1);
+  expect(exists('notes/notes_v0.png', OTHER)).toBe(true);
 });
 
-test('detach: refused while its drawing is loaded; after loading another, removes the section only', async () => {
+test('detach: refused while its drawing is loaded', async () => {
   let alerted = '';
   page.once('dialog', (d) => { page.once('dialog', (a) => { alerted = a.message(); a.accept(); }); d.accept(); });
-  await page.locator('section[data-folder]').nth(1).locator('[data-action="detach"]').click({ force: true });
+  await act(folder(page, other), 'detach');
   await expect.poll(() => alerted).toContain('load a drawing from another folder first');
-  await expect(page.locator('section[data-folder]')).toHaveCount(2);
+  await expect(roots()).toHaveCount(2);
+});
 
-  await page.locator('section[data-folder]').first().locator('li[data-testid="drawing"] button.open').first().click();
-  await expect(page.getByTestId('current')).not.toContainText('other-repo');
+test('drag across roots: the drawing, its png and its Revert history move; Revert still works', async () => {
+  const hist = path.join(BACKUPS, other, 'notes', 'notes_v0.excalidraw');
+  expect(fs.readdirSync(hist)).toHaveLength(1); // the overwrite above kept the old file
+  // The highlight, with synthetic drag events (Playwright's real drag does not leave the pointer over a target to look at).
+  const src = drawing(page, other, NOTE);
+  const target = folder(page, main, 'mindmap');
+  const dt = await page.evaluateHandle(() => new DataTransfer());
+  await src.dispatchEvent('dragstart', { dataTransfer: dt });
+  await target.dispatchEvent('dragover', { dataTransfer: dt });
+  await expect(target).toHaveClass(/drop/);
+  await target.dispatchEvent('dragleave', { dataTransfer: dt });
+  await expect(target).not.toHaveClass(/drop/);
+  await folder(page, other, 'notes').dispatchEvent('dragover', { dataTransfer: dt }); // the drawing's own folder: no target
+  await expect(folder(page, other, 'notes')).not.toHaveClass(/drop/);
+  await src.dispatchEvent('dragend', { dataTransfer: dt });
+  // The real drag and drop.
+  await src.dragTo(target);
+  await expect(page.getByTestId('message')).toHaveText('Moved other-repo/notes/notes_v0.excalidraw to repo/mindmap/notes_v0.excalidraw');
+  await expect(folder(page, main, 'mindmap')).not.toHaveClass(/drop/);
+  expect(exists('mindmap/notes_v0.excalidraw')).toBe(true);
+  expect(exists('mindmap/notes_v0.png')).toBe(true);
+  expect(exists(NOTE, OTHER)).toBe(false);
+  expect(exists('notes/notes_v0.png', OTHER)).toBe(false);
+  expect(fs.readdirSync(path.join(BACKUPS, main, 'mindmap', 'notes_v0.excalidraw'))).toHaveLength(1);
+  expect(fs.existsSync(hist)).toBe(false);
+  await expect(page.getByTestId('current')).toHaveText('repo / mindmap / notes_v0.excalidraw');
+  await expect(drawing(page, main, 'mindmap/notes_v0.excalidraw')).toBeVisible();
+
+  await expect(page.getByTestId('revert')).toBeEnabled();
   page.once('dialog', (d) => d.accept());
-  await page.locator('section[data-folder]').nth(1).locator('[data-action="detach"]').click({ force: true });
-  await expect(page.locator('section[data-folder]')).toHaveCount(1);
-  expect(fs.existsSync(path.join(OTHER, 'notes', 'notes_v0.excalidraw'))).toBe(true);
+  await page.getByTestId('revert').click();
+  await expect(page.getByTestId('message')).toHaveText('Reverted repo/mindmap/notes_v0.excalidraw (0 earlier states left)');
+  expect(readDoc('mindmap/notes_v0.excalidraw').elements).toHaveLength(1); // the state before the rectangle
+  await expect(page.getByTestId('revert')).toBeDisabled();
+});
+
+test('detach: removes the root only; attach again by its number in the recent list', async () => {
+  page.once('dialog', (d) => d.accept());
+  await act(folder(page, other), 'detach');
+  await expect(roots()).toHaveCount(1);
+  expect(await rootId(OTHER)).toBeUndefined();
+  expect(fs.existsSync(path.join(OTHER, 'notes'))).toBe(true); // files stay on disk
+
+  const prompted = await attach('1');
+  expect(prompted).toContain(`1. ${OTHER}`);
+  await expect(roots()).toHaveCount(2);
+  expect(await rootId(OTHER)).toBe(other); // same folder, same id
   await page.screenshot({ path: 'test-results/workspace-final.png' });
 });

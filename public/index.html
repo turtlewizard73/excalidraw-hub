@@ -7,26 +7,33 @@
 </head>
 <body>
   <aside id="sidebar">
-    <h1>Drawings <button type="button" id="add-folder" data-testid="add-folder" hidden title="Attach another folder of projects (saved, reopened after a restart)">+ Add folder</button></h1>
-    <div id="projects" aria-live="polite">Loading…</div>
+    <h1>
+      <span>Drawings</span>
+      <span class="tools">
+        <button type="button" id="collapse-all" data-testid="collapse-all" title="Collapse all folders">⊟</button>
+        <button type="button" id="add-folder" data-testid="add-folder" hidden title="Attach another folder (saved, reopened after a restart)">+ Add folder</button>
+      </span>
+    </h1>
+    <div id="tree" role="tree" aria-live="polite">Loading…</div>
   </aside>
+  <div id="resizer" data-testid="resizer" title="Drag to resize, double-click to reset"></div>
   <main>
     <header>
+      <button type="button" id="toggle-sidebar" data-testid="toggle-sidebar" title="Show or hide the sidebar (Ctrl+B)">☰</button>
       <span id="current" data-testid="current">No drawing loaded</span>
       <span id="dirty" data-testid="dirty" class="badge"></span>
       <form id="save-form">
-        <select id="save-folder" data-testid="save-folder" hidden title="Folder to save into"></select>
-        <input id="save-project" data-testid="save-project" list="project-names" placeholder="project" required>
-        <datalist id="project-names"></datalist>
+        <span id="save-target" data-testid="save-target" title="Folder the next save goes into: click a folder in the sidebar to change it"></span>
         <input id="save-label" data-testid="save-label" placeholder="label (optional)">
         <button type="submit" data-action="save" data-testid="save" title="Save over the loaded drawing (the old file is kept for Revert)">Save</button>
-        <button type="submit" data-action="version" data-testid="save-version" title="Save as the next version (_v1, _v2, ...)">Save new version</button>
+        <button type="submit" data-action="version" data-testid="save-version" title="Save as the next version (_v0, _v1, ...)">Save new version</button>
         <button type="button" id="revert" data-testid="revert" disabled title="Go back to the loaded drawing's previous saved state">Revert</button>
       </form>
       <span id="message" data-testid="message" role="status"></span>
     </header>
     <iframe id="canvas" title="Excalidraw canvas"></iframe>
   </main>
+  <div id="shield" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

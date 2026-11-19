@@ -1,18 +1,21 @@
-# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here (deployed copy: parent repo's projects/excalidraw-hub, a submodule).
-# Hub http://localhost:3080, canvas http://localhost:3000 (the agent's Excalidraw MCP talks to :3000). See docs/setup.md.
+# Excalidraw hub + its canvas. Start: `docker compose up -d --build` here. Settings: .env or the shell (see .env.example).
+# Hub http://localhost:${HUB_PORT:-3080}, canvas http://localhost:${CANVAS_PORT:-3000}. The compose project name is the clone's folder name.
 services:
   canvas:
     # Fork of yctimlin/mcp_excalidraw (git subtree in canvas/): stock canvas + code blocks (Mermaid, PlantUML, Salt).
-    # In-memory scene: a restart empties it; drawings live in parent repo's docs/drawings.
+    # In-memory scene: a restart empties it; drawings live in the folders attached in the hub.
     build:
       context: ./canvas
       dockerfile: Dockerfile.canvas
     ports:
-      - "127.0.0.1:3000:3000"   # fixed: parent repo's .claude/mcp/excalidraw.sh connects here
+      - "127.0.0.1:${CANVAS_PORT:-3000}:3000"   # the agent's Excalidraw MCP and the hub iframe use this port
     environment:
       # Code blocks: PlantUML/Salt render via the canvas server. Set PLANTUML_URL in .env to use an existing
       # renderer (e.g. https://kroki.io/plantuml) and the plantuml container is not started. Mermaid renders in the browser.
       PLANTUML_URL: "${PLANTUML_URL:-http://plantuml:8080}"
+    volumes:
+      # Same path as on the host: the MCP's file export (docker compose exec into this container) writes where the drawings are.
+      - "${FOLDERS_ROOT:-${HOME}}:${FOLDERS_ROOT:-${HOME}}"
     depends_on:
       plantuml:
         condition: service_started
@@ -36,27 +39,25 @@ services:
     build: .
     ports:
       - "127.0.0.1:${HUB_PORT:-3080}:${HUB_PORT:-3080}"   # host loopback only
-    # Host user, so saved drawings are not root-owned in the repo (.env sets UID/GID; bash does not export them).
+    # Host user, so saved drawings are not root-owned (.env sets UID/GID; bash does not export them).
     user: "${UID:-1000}:${GID:-1000}"
     environment:
       HUB_HOST: 0.0.0.0
       HUB_PORT: "${HUB_PORT:-3080}"
-      CANVAS_URL: "${CANVAS_URL:-http://canvas:3000}"                   # server -> canvas REST (compose network)
-      CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:3000}"  # browser -> canvas iframe
+      HUB_WAIT_FOR_MOUNT: "1"   # exit until FOLDERS_ROOT is mounted (Docker Desktop can start us before the WSL mount)
+      CANVAS_URL: http://canvas:3000   # server -> canvas REST (compose network)
+      CANVAS_PUBLIC_URL: "${CANVAS_PUBLIC_URL:-http://localhost:${CANVAS_PORT:-3000}}"   # browser -> canvas iframe
       HOME: /home/node
-      REPO_DIR: /repo                          # parent repo's git repo, for the per-project sync button
-      DRAWINGS_DIR: /repo/docs/drawings
+      FOLDERS_ROOT: "${FOLDERS_ROOT:-${HOME}}"   # only folders inside it can be attached (mounted below)
+      HUB_STATE: "${HUB_STATE:-/config/hub.json}"   # default = ./config/hub.json on the host (mounted below); a set path must lie inside FOLDERS_ROOT
       BACKUPS_DIR: /backups
-      SYNC_BRANCH: "${SYNC_BRANCH:-development}"   # sync pushes only from this branch
-      WORKSPACE_FILE: /workspace/workspace.json   # folders attached in the sidebar, reopened after a restart
-      FOLDERS_ROOT: "${HUB_FOLDERS_ROOT:-${HOME}}"  # only folders inside it can be attached (mounted below)
+      HUB_AUTO_SYNC_BRANCHES: "${HUB_AUTO_SYNC_BRANCHES:-development,dev}"
     volumes:
-      - "${HUB_REPO:-../..}:/repo"
-      - "${HUB_BACKUPS:-./backups}:/backups"   # copies of overwritten drawings, for Revert
-      - "${HUB_WORKSPACE:-./workspace}:/workspace"   # workspace.json, shared with scripts/native.sh
+      - "./config:/config"
+      - "${BACKUPS_DIR:-./backups}:/backups"   # copies of overwritten drawings, for Revert
       # Same path inside as on the host, so a path typed in "+ Add folder" means the same in both runtimes.
-      # Read-write: drawings in attached folders are saved there. Narrow it with HUB_FOLDERS_ROOT (e.g. ~/repos).
-      - "${HUB_FOLDERS_ROOT:-${HOME}}:${HUB_FOLDERS_ROOT:-${HOME}}"
+      # Read-write: drawings in attached folders are saved there. Narrow it with FOLDERS_ROOT (e.g. ~/repos).
+      - "${FOLDERS_ROOT:-${HOME}}:${FOLDERS_ROOT:-${HOME}}"
       # Your git identity and SSH key, so sync commits as you and can push (key must have no passphrase).
       - "${HOME}/.gitconfig:/home/node/.gitconfig:ro"
       - "${HOME}/.ssh:/home/node/.ssh:ro"

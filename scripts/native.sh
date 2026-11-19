@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the hub and its canvas without Docker: plain Node processes on the host (Linux/WSL).
 #   scripts/native.sh install   # once, and after pulling canvas changes: npm ci + build in canvas/
-#   scripts/native.sh start     # canvas :3000 + hub :3080 in the background, logs in .native/
+#   scripts/native.sh start     # canvas (CANVAS_PORT, 3000) + hub (HUB_PORT, 3080) in the background, logs in .native/
 #   scripts/native.sh stop | restart | status
 # Reads .env like compose does (variables already set in the shell win). PlantUML is optional: set PLANTUML_URL.
 set -euo pipefail
@@ -34,7 +34,7 @@ if [ -f "$env_file" ]; then
 fi
 
 state="$(realpath -m "${NATIVE_DIR:-$root/.native}")"
-canvas_port="${CANVAS_PORT:-3000}"   # parent repo's .claude/mcp/excalidraw.sh connects to :3000
+canvas_port="${CANVAS_PORT:-3000}"   # the MCP and the hub iframe must agree on it
 hub_port="${HUB_PORT:-3080}"
 canvas_url="http://127.0.0.1:$canvas_port"
 declare -A marker=([canvas]=dist/server.js [hub]=src/main.js)   # what a live process of ours has on its command line
@@ -81,12 +81,11 @@ start() {
   check_tools
   [ -f canvas/dist/server.js ] && [ -d canvas/dist/frontend ] || die "canvas not built. Run: scripts/native.sh install"
   mkdir -p "$state"
-  local repo drawings backups workspace name port rc=0
-  repo="$(realpath "${HUB_REPO:-../..}")"
-  drawings="${DRAWINGS_DIR:-$repo/docs/drawings}"
-  backups="$(mkdir -p "${HUB_BACKUPS:-./backups}" && realpath "${HUB_BACKUPS:-./backups}")"
-  workspace="$(mkdir -p "${HUB_WORKSPACE:-./workspace}" && realpath "${HUB_WORKSPACE:-./workspace}")"
-  [[ "${HUB_FOLDERS_ROOT:-$HOME}" == /* ]] || die "HUB_FOLDERS_ROOT must be an absolute path (compose needs it too), got: $HUB_FOLDERS_ROOT"
+  local backups hub_state folders_root name port rc=0
+  backups="$(mkdir -p "${BACKUPS_DIR:-./backups}" && realpath "${BACKUPS_DIR:-./backups}")"
+  hub_state="$(realpath -m "${HUB_STATE:-./config/hub.json}")"; mkdir -p "$(dirname "$hub_state")"
+  folders_root="${FOLDERS_ROOT:-$HOME}"
+  [[ "$folders_root" == /* ]] || die "FOLDERS_ROOT must be an absolute path (compose needs it too), got: $folders_root"
   for name in canvas hub; do
     port="$canvas_port"; [ "$name" = hub ] && port="$hub_port"
     pid_of "$name" >/dev/null || ! port_busy "$port" || die "port $port is in use by another program (Docker stack still up? docker compose down)"
@@ -101,8 +100,8 @@ start() {
   launch hub . "http://127.0.0.1:$hub_port/api/status" env NODE_ENV=production \
     HUB_HOST=127.0.0.1 HUB_PORT="$hub_port" \
     CANVAS_URL="${CANVAS_URL:-$canvas_url}" CANVAS_PUBLIC_URL="${CANVAS_PUBLIC_URL:-http://localhost:$canvas_port}" \
-    REPO_DIR="$repo" DRAWINGS_DIR="$drawings" BACKUPS_DIR="$backups" SYNC_BRANCH="${SYNC_BRANCH:-development}" \
-    WORKSPACE_FILE="$workspace/workspace.json" FOLDERS_ROOT="${HUB_FOLDERS_ROOT:-$HOME}" \
+    BACKUPS_DIR="$backups" HUB_STATE="$hub_state" FOLDERS_ROOT="$folders_root" \
+    ${HUB_AUTO_SYNC_BRANCHES:+HUB_AUTO_SYNC_BRANCHES="$HUB_AUTO_SYNC_BRANCHES"} \
     ${HUB_ALLOWED_HOSTS:+HUB_ALLOWED_HOSTS="$HUB_ALLOWED_HOSTS"} node src/main.js || rc=$?
   if [ "$rc" -eq 1 ]; then [ "$started_canvas" -eq 0 ] || stop_one canvas; exit 1; fi
   echo "native: open http://localhost:$hub_port"

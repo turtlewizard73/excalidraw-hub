@@ -1,6 +1,6 @@
 # Plan: save buttons, save-before-switch, revert, git sync (2026-11-14)
 
-Spec: `docs/specs/2026-11-02-excalidraw-hub.md`, sections "Save: two buttons", "Switching drawings saves first", "Revert", "Sync a project to git". Branch `feat/save-revert-sync`. Task records: parent repo `tasks/2026-11-14-hub-save-switch-revert.md`, `tasks/2026-11-14-hub-git-sync.md`.
+Spec: `docs/specs/2026-11-02-excalidraw-hub.md`, sections "Save: two buttons", "Switching drawings saves first", "Revert", "Sync a project to git". Branch `feat/save-revert-sync`. Task records: the parent repo `tasks/2026-11-14-hub-save-switch-revert.md`, `tasks/2026-11-14-hub-git-sync.md`.
 
 ## Decisions taken with the user (2026-11-14)
 - Checkbox removed; two buttons.
@@ -35,5 +35,5 @@ Done 2026-11-14 on `feat/save-revert-sync`. All four behaviours work: two save b
 
 **Open**
 - `~/.ssh` is read-only in the container, so an unknown host key fails the push (github.com is already in `known_hosts`).
-- A slow pre-commit hook would hold the serial queue for up to 60 s (parent repo has no hooks today).
+- A slow pre-commit hook would hold the serial queue for up to 60 s (the parent repo has no hooks today).
 - Concurrent syncs are not serialized for the push; a ref-lock failure is reported.

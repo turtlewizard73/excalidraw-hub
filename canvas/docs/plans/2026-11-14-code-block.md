@@ -9,7 +9,7 @@ Spec: [../specs/2026-11-14-code-block.md](../specs/2026-11-14-code-block.md). Wo
 5. **Hover overlay + editor.** Overlay with `Code`/`Diagram` and `Edit` over the hovered block; textarea editor (Save/Cancel, language select). Re-render keeps x/y/width. "Code block" button to create an empty one.
 6. **PlantUML + Salt.** Server route `POST /api/render/plantuml` → `PLANTUML_URL/svg` (size limit, timeout, error passthrough); renderer entries for `plantuml` and `salt`.
 7. **Verify.** Upstream tests still pass (`npm test` in Docker). Playwright e2e against :3001/:3081: paste each language, toggle, edit, save in hub, reload, PNG shows the diagram. Independent review by another agent before calling it done.
-8. **Outcome** section below; record the lesson for chartroom (`projects/chartroom`) in parent repo's task record.
+8. **Outcome** section below; record the lesson for chartroom (`projects/chartroom`) in the parent repo's task record.
 
 Not in scope: pushing the fork to GitHub or upstreaming (ask first); switching the real stack (:3000) to this image.
 

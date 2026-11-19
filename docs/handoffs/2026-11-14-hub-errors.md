@@ -1,7 +1,7 @@
 # Handoff: fix excalidraw-hub errors found on 2026-11-14
 
 ## Task
-Fix the excalidraw-hub problems listed below. Work in `sandbox/excalidraw-hub/`. Read its `README.md`, `docs/specs/2026-11-02-excalidraw-hub.md` and `docs/plans/2026-11-02-excalidraw-hub.md` first. Follow parent repo's root `CLAUDE.md`:
+Fix the excalidraw-hub problems listed below. Work in `sandbox/excalidraw-hub/`. Read its `README.md`, `docs/specs/2026-11-02-excalidraw-hub.md` and `docs/plans/2026-11-02-excalidraw-hub.md` first. Follow the parent repo's root `CLAUDE.md`:
 - Open a task record in `tasks/`.
 - Work on a `feat/` branch.
 - Run tests in the isolated stack (`scripts/e2e.sh`, ports 3100/3180), never against the live canvas `:3000` or `docs/drawings/`.
@@ -10,7 +10,7 @@ Fix the excalidraw-hub problems listed below. Work in `sandbox/excalidraw-hub/`.
 Reproduce each problem before fixing it. E2 and E3 are unconfirmed, so confirm or rule them out first.
 
 ## Context
-- **Hub:** a Node server, Docker, `127.0.0.1:3080`. It shows a sidebar of drawings over an iframe of the mcp_excalidraw canvas (`:3000`, image `ghcr.io/yctimlin/mcp_excalidraw-canvas:2.1.2`), and saves to `parent repo/docs/drawings/<project>/`.
+- **Hub:** a Node server, Docker, `127.0.0.1:3080`. It shows a sidebar of drawings over an iframe of the mcp_excalidraw canvas (`:3000`, image `ghcr.io/yctimlin/mcp_excalidraw-canvas:2.1.2`), and saves to `the parent repo/docs/drawings/<project>/`.
 - **Session that hit these problems:** an agent drew C4 diagrams with the excalidraw MCP tools (`batch_create_elements`, `update_element`), plus canvas REST `PUT /api/elements/:id` to re-route arrow points. It then tried to save through the hub, `POST /api/save {"project":"chartroom","label":"hub_and_excalidash_c4","versioned":true}`.
 - **The user** has the hub page open only sometimes. They often view drawings as `.excalidraw` files in VS Code instead.
 

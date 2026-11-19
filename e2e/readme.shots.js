@@ -1,6 +1,7 @@
 // README screenshots (run by scripts/screenshots.sh, never by e2e.sh). Builds made-up demo drawings through the
 // canvas REST API and the hub's agent save, then drives the real page. Output: test-results/readme/*.png.
 import { test, expect } from '@playwright/test';
+import { drawing, open, rootId } from './helpers.js';
 
 const CANVAS = process.env.CANVAS_URL;
 const HUB = process.env.HUB_URL;
@@ -11,22 +12,22 @@ const box = (id, x, y, text, bg, w = 190, h = 80) => ({ id, type: 'rectangle', x
 const arrow = (id, from, to, [x1, y1], [x2, y2], text) => ({ id, type: 'arrow', x: x1, y: y1, points: [[0, 0], [x2 - x1, y2 - y1]], start: { id: from }, end: { id: to }, endArrowhead: 'arrow', ...(text ? { label: { text } } : {}) });
 const note = (id, x, y, text, size = 20) => ({ id, type: 'text', x, y, text, fontSize: size });
 
-// Made-up projects only. Each entry is drawn on an empty canvas and saved through the hub like an agent would.
+// Made-up folders only. Each entry is drawn on an empty canvas and saved into `dir` through the hub like an agent would.
 const DRAWINGS = [
-  { project: 'garden', label: 'beds', versioned: true, elements: [
+  { dir: 'garden', label: 'beds', versioned: true, elements: [
     note('t', 0, -70, 'Spring beds', 28),
     box('a', 0, 0, 'Tomatoes', '#ffc9c9'), box('b', 230, 0, 'Herbs', '#b2f2bb'), box('c', 460, 0, 'Beans', '#ffec99'),
   ] },
-  { project: 'garden', label: 'drip', versioned: true, elements: [
+  { dir: 'garden', label: 'drip', versioned: true, elements: [
     note('t', 0, -70, 'Spring beds + drip line', 28),
     box('a', 0, 0, 'Tomatoes', '#ffc9c9'), box('b', 230, 0, 'Herbs', '#b2f2bb'), box('c', 460, 0, 'Beans', '#ffec99'),
     box('tap', 230, 200, 'Rain barrel', '#a5d8ff'),
     arrow('p1', 'tap', 'a', [280, 200], [95, 80]), arrow('p2', 'tap', 'b', [325, 200], [325, 80]), arrow('p3', 'tap', 'c', [370, 200], [555, 80]),
   ] },
-  { project: 'recipes', label: 'ideas', versioned: false, elements: [
+  { dir: 'recipes/drafts', label: 'ideas', versioned: false, elements: [
     note('t', 0, 0, 'ideas: meal plans, shopping list, timers', 24),
   ] },
-  { project: 'recipes', label: 'arch', versioned: true, elements: [
+  { dir: 'recipes', label: 'arch', versioned: true, elements: [
     note('t', 0, -80, 'Recipe app: architecture', 28),
     box('mob', 0, 0, 'Mobile app', '#d0bfff'), box('web', 0, 160, 'Web app', '#d0bfff'),
     box('api', 330, 80, 'Recipe API', '#a5d8ff'),
@@ -34,7 +35,7 @@ const DRAWINGS = [
     arrow('a1', 'mob', 'api', [190, 40], [330, 110], 'REST'), arrow('a2', 'web', 'api', [190, 200], [330, 130], 'REST'),
     arrow('a3', 'api', 'db', [520, 110], [660, 40]), arrow('a4', 'api', 'img', [520, 130], [660, 200]),
   ] },
-  { project: 'onboarding', label: 'week1', versioned: true, elements: [
+  { dir: 'onboarding', label: 'week1', versioned: true, elements: [
     box('d1', 0, 0, 'Day 1: laptop + accounts', '#e9ecef', 260), box('d2', 320, 0, 'Day 2: codebase tour', '#e9ecef', 260),
     box('d5', 640, 0, 'Day 5: first PR', '#b2f2bb', 260),
     arrow('x1', 'd1', 'd2', [260, 40], [320, 40]), arrow('x2', 'd2', 'd5', [580, 40], [640, 40]),
@@ -46,10 +47,9 @@ const PLANTUML = '@startuml\nactor Cook\nCook -> "Recipe API": search "pasta"\n"
 const SALT = '@startsalt\n{\n  Recipe   | "Pancakes      "\n  Servings | ^4^\n  [x] Vegetarian\n  [Cancel] | [  Save  ]\n}\n@endsalt';
 
 test.describe.configure({ mode: 'serial' });
-let page, frame, iframeBox;
+let page, frame, iframeBox, root;
 
 const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
-const drawing = (file) => page.locator(`li[data-testid="drawing"][data-file="${file}"]`);
 const fit = () => post(`${CANVAS}/api/viewport`, { scrollToContent: true });
 const settle = (ms = 1500) => page.waitForTimeout(ms);
 const codeBlocks = async () => (await (await fetch(`${CANVAS}/api/elements`)).json()).elements.filter((e) => e.customData?.kind === 'codeblock');
@@ -64,10 +64,13 @@ async function paste(text, x, y) {
 }
 
 test('seed demo drawings (no tab open, agent saves)', async () => {
+  root = await rootId();
+  expect(root).toBeTruthy();
+  for (const path of ['garden', 'recipes', 'recipes/drafts', 'onboarding']) await post(`${HUB}/api/mkdir`, { root, path });
   for (const d of DRAWINGS) {
     await fetch(`${CANVAS}/api/elements/clear`, { method: 'DELETE' });
     expect((await post(`${CANVAS}/api/elements/batch`, { elements: d.elements })).ok).toBe(true);
-    const res = await post(`${HUB}/api/save`, { project: d.project, label: d.label, versioned: d.versioned });
+    const res = await post(`${HUB}/api/save`, { root, dir: d.dir, label: d.label, versioned: d.versioned });
     expect(res.status, await res.clone().text()).toBe(200);
   }
 });
@@ -81,15 +84,13 @@ test('overview: sidebar, a loaded drawing, hover actions', async ({ browser }) =
   await frame.evaluate(() => document.fonts.ready);
   await settle();
   iframeBox = await page.locator('#canvas').boundingBox();
-  for (const p of ['garden', 'recipes', 'onboarding']) {
-    await page.locator(`details[data-project="${p}"]`).evaluate((d) => { d.open = true; });
-  }
-  await drawing('recipes_v0_arch.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('recipes / recipes_v0_arch.excalidraw');
+  for (const dir of ['garden', 'recipes', 'recipes/drafts', 'onboarding']) await open(page, root, dir);
+  await drawing(page, root, 'recipes/recipes_v0_arch.excalidraw').locator('button.open').click();
+  await expect(page.getByTestId('current')).toHaveText('repo / recipes / recipes_v0_arch.excalidraw');
   await settle();
   await fit();
   await settle();
-  await drawing('garden_v1_drip.excalidraw').hover();
+  await drawing(page, root, 'garden/garden_v1_drip.excalidraw').hover();
   await shot('hub-overview');
 });
 

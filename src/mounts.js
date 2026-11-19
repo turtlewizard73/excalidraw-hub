@@ -3,9 +3,10 @@
 // restart policy retries until the real folder is connected (spec: "Boot race").
 import fs from 'node:fs/promises';
 
-/** Returns null when `dir` has at least one entry, otherwise why the drawings folder is not usable. */
+/** Returns null when `dir` (FOLDERS_ROOT) is readable and has at least one entry, otherwise why it is not usable. */
 export async function checkDrawingsDir(dir) {
+  if (!dir) return 'FOLDERS_ROOT is not set';
   let entries;
-  try { entries = await fs.readdir(dir); } catch (e) { return `cannot read drawings folder ${dir}: ${e.code ?? e.message}`; }
-  return entries.length ? null : `drawings folder ${dir} is empty (under Docker: bind mount not connected yet?)`;
+  try { entries = await fs.readdir(dir); } catch (e) { return `cannot read FOLDERS_ROOT ${dir}: ${e.code ?? e.message}`; }
+  return entries.length ? null : `FOLDERS_ROOT ${dir} is empty (under Docker: bind mount not connected yet?)`;
 }

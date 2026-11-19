@@ -1,5 +1,5 @@
-// Per-project sync of the drawings folder in parent repo's git repo: stage + commit only that folder, push only on
-// the sync branch. Rules: docs/specs/2026-11-02-excalidraw-hub.md, "Sync a project to git".
+// Sync of one folder of a git repo: update the checkout when it is strictly behind, commit the folder's drawings and PNGs,
+// push to the branch's upstream. Rules: docs/specs/2026-11-19-standalone-workspace.md, "Sync".
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -19,61 +19,104 @@ export function gitRunner(repoDir, timeout = 60000) {
   });
 }
 
-/** "<project> <names> diagram update": changed drawings without the `<project>_` prefix, at most 5. */
-export function commitMessage(project, paths) {
-  const bases = [];
-  for (const p of paths) {
-    const name = path.posix.basename(p).replace(/\.(excalidraw|png)$/, '');
-    const short = name.startsWith(`${project}_`) ? name.slice(project.length + 1) : name;
-    if (!bases.includes(short)) bases.push(short);
-  }
-  const shown = bases.slice(0, 5).join(', ') + (bases.length > 5 ? ` +${bases.length - 5} more` : '');
-  return `${project} ${shown} diagram update`;
+/**
+ * Which of `paths` (relative to `repoDir`; give directories a trailing slash) git ignores, in one `check-ignore --stdin` call.
+ * Never throws: if git fails, nothing counts as ignored.
+ */
+export function gitIgnored(repoDir, paths, timeout = 10000) {
+  if (!paths.length) return Promise.resolve(new Set());
+  return new Promise((resolve) => {
+    const child = execFile('git', ['-C', repoDir, 'check-ignore', '-z', '--stdin'], { timeout, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => {
+      // exit 1 = nothing ignored; anything else (not a repo, timeout) is treated the same
+      resolve(err ? new Set() : new Set(stdout.split('\0').filter(Boolean)));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(paths.join('\0') + '\0');
+  });
 }
 
 /**
- * @param {{run: (args: string[]) => Promise<string>, drawingsPath: string, branch?: string}} opts
- * drawingsPath: the drawings folder relative to the repo root, e.g. "docs/drawings".
+ * The git work tree that contains `dir` (spec: repo detection): {ok: true, top} with top the real path of its top level,
+ * or {ok: false, reason}. Never throws. Not ok when git fails (not a repo, dubious ownership, ...) or the top is not visible to the hub.
  */
-export function createGit({ run, drawingsPath, branch: syncBranch = 'dev' }) {
-  const folderOf = (project) => {
-    if (!isSafeName(project)) throw new GitError(`invalid project name: ${JSON.stringify(project)}`);
-    return `${path.posix.join(drawingsPath.split(path.sep).join('/'), project)}/`;
-  };
-  // Pushes run one at a time (outside the hub's queue): two at once would race on the worktree and the remote ref.
+export async function repoTopLevel(dir, run = gitRunner(dir, 10000)) {
+  let top;
+  try { top = (await run(['rev-parse', '--show-toplevel'])).trim(); } catch (e) { return { ok: false, reason: `${dir}: ${e.message}` }; } // git's own words
+  try { return { ok: true, top: await fs.realpath(top) }; } catch { return { ok: false, reason: `${dir} is in the git repository ${top}, which the hub cannot see` }; }
+}
+
+/** "<folder> <names> diagram update": changed drawings without the `<folder>_` prefix, at most 5. */
+export function commitMessage(label, paths) {
+  const bases = [];
+  for (const p of paths) {
+    const name = path.posix.basename(p).replace(/\.(excalidraw|png)$/, '');
+    const short = name.startsWith(`${label}_`) ? name.slice(label.length + 1) : name;
+    if (!bases.includes(short)) bases.push(short);
+  }
+  const shown = bases.slice(0, 5).join(', ') + (bases.length > 5 ? ` +${bases.length - 5} more` : '');
+  return `${label} ${shown} diagram update`;
+}
+
+const LITERAL = ['--literal-pathspecs'];
+const escapeGlob = (s) => s.replace(/[\\*?[\]]/g, '\\$&');
+/** Pathspecs for the drawings and PNGs under `dir` (relative to the repo top, '' = the top), directly in it and at any depth. */
+export function drawingPathspecs(dir) {
+  const base = dir ? `${escapeGlob(dir)}/` : '';
+  return ['excalidraw', 'png'].flatMap((ext) => [`:(glob)${base}*.${ext}`, `:(glob)${base}**/*.${ext}`]);
+}
+
+/** Files git reports changed under the pathspecs (`status --porcelain -z`), renames as both paths. Hidden folders and node_modules are not drawings the explorer shows. */
+async function changedFiles(run, dir, specs) {
+  const parts = (await run(['status', '--porcelain', '-z', '--untracked-files=all', '--', ...specs])).split('\0');
+  const files = [];
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i];
+    if (!entry) continue;
+    files.push(entry.slice(3));
+    if (entry[0] === 'R' || entry[0] === 'C') files.push(parts[++i]);
+  }
+  const inside = (f) => (dir ? f.slice(dir.length + 1) : f).split('/').slice(0, -1);
+  return files.filter((f) => !inside(f).some((seg) => seg.startsWith('.') || seg === 'node_modules'));
+}
+
+/**
+ * One git client per repo top level: everything on it runs one at a time (a second sync would race on the worktree and the remote ref).
+ * @param {{run: (args: string[]) => Promise<string>, autoBranches?: string[]}} opts
+ * autoBranches: branches where sync commits and pushes without asking.
+ */
+export function createGit({ run, autoBranches = ['development', 'dev'] }) {
   let lane = Promise.resolve();
   const oneAtATime = (fn) => { const r = lane.then(fn); lane = r.catch(() => {}); return r; };
+  const ok = (args) => run(args).then(() => true, () => false);
   const count = (args) => run(args).then((s) => Number(s.trim()));
 
   /**
-   * Publish only the drawing commit: cherry-pick it onto origin/<branch> in a throwaway worktree and push that.
-   * Only this commit's change goes up, so changes made on origin meanwhile are kept. Where both changed the same
+   * Publish only the drawing commit: cherry-pick it onto the upstream in a throwaway worktree and push that.
+   * Only this commit's change goes up, so changes made on the remote meanwhile are kept. Where both changed the same
    * file, this commit's version of that file wins. Local unpushed commits stay local.
    */
-  async function pushDrawingsOnly(sha) {
+  async function pushDrawingsOnly(sha, remote, rbranch) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-sync-'));
     const w = (args) => run(['-C', dir, ...args]); // a later absolute -C wins over the repo's
     let added = false;
     try {
       // No `worktree prune`: inside the container, the user's own worktrees look missing and would be unregistered.
-      await run(['worktree', 'add', '-q', '--detach', dir, `origin/${syncBranch}`]);
+      await run(['worktree', 'add', '-q', '--detach', dir, `${remote}/${rbranch}`]);
       added = true;
       const picked = await w(['cherry-pick', '--allow-empty', '--keep-redundant-commits', sha]).then(() => true, () => false);
       if (!picked) {
         // Conflicts only in files both sides changed: take this commit's version of each, keep everything else.
         const conflicted = (await w(['diff', '--name-only', '-z', '--diff-filter=U'])).split('\0').filter(Boolean);
-        if (!conflicted.length) throw new GitError('cherry-pick onto origin failed without conflicts');
+        if (!conflicted.length) throw new GitError('cherry-pick onto the remote failed without conflicts');
         for (const f of conflicted) {
-          const inOurs = await run(['cat-file', '-e', `${sha}:${f}`]).then(() => true, () => false);
-          await w(inOurs ? ['checkout', sha, '--', f] : ['rm', '-q', '--', f]);
-          if (inOurs) await w(['add', '--', f]);
+          const inOurs = await ok(['cat-file', '-e', `${sha}:${f}`]);
+          await w(inOurs ? [...LITERAL, 'checkout', sha, '--', f] : [...LITERAL, 'rm', '-q', '--', f]); // cat-file takes an object name, not a pathspec: no flag there
+          if (inOurs) await w([...LITERAL, 'add', '--', f]);
         }
         await w(['-c', 'core.editor=true', 'cherry-pick', '--continue']);
       }
-      if (await run(['-C', dir, 'diff', '--quiet', `origin/${syncBranch}`, 'HEAD']).then(() => true, () => false)) {
-        return { pushed: true, alreadyUpstream: true };
-      }
-      await w(['push', '-q', 'origin', `HEAD:refs/heads/${syncBranch}`]);
+      if (await ok(['-C', dir, 'diff', '--quiet', `${remote}/${rbranch}`, 'HEAD'])) return { pushed: true, alreadyUpstream: true };
+      await w(['push', '-q', remote, `HEAD:refs/heads/${rbranch}`]);
       return { pushed: true, onlyDrawings: true };
     } finally {
       if (added) await run(['worktree', 'remove', '--force', dir]).catch(() => {});
@@ -81,59 +124,87 @@ export function createGit({ run, drawingsPath, branch: syncBranch = 'dev' }) {
     }
   }
 
+  /** Publish `commit`: a plain push when the branch is exactly upstream + that commit, else only the drawings. Never throws. */
+  async function publish(commit, remote, rbranch) {
+    try {
+      const upstream = `${remote}/${rbranch}`;
+      const ahead = await count(['rev-list', '--count', `${upstream}..HEAD`]);
+      if (ahead === 1 && await ok(['merge-base', '--is-ancestor', upstream, 'HEAD'])) {
+        try { await run(['push', '-q', remote, `${commit}:refs/heads/${rbranch}`]); return { pushed: true }; } catch { /* the remote moved since the fetch: below */ }
+        await run(['fetch', '-q', remote, rbranch]);
+        const r = await pushDrawingsOnly(commit, remote, rbranch);
+        await run(['fetch', '-q', remote, rbranch]).catch(() => {});
+        return { ...r, keptLocal: 0, note: 'the remote moved meanwhile; only the drawings went up (git pull --rebase when ready)' };
+      }
+      const r = await pushDrawingsOnly(commit, remote, rbranch);
+      await run(['fetch', '-q', remote, rbranch]).catch(() => {});
+      return { ...r, keptLocal: Math.max(0, ahead - 1), note: 'other unpushed commits stayed local; only the drawings went up (git pull --rebase when ready)' };
+    } catch (e) {
+      return { pushed: false, pushError: e.message };
+    }
+  }
+
   return {
-    syncBranch,
+    autoBranches,
 
     /**
-     * Stage and commit one project folder. Fast: run it in the hub's serial queue.
-     * Asks first (returns needsConfirm, changes nothing) when not on the sync branch. `confirm` lists the questions
-     * already answered yes (only 'branch').
+     * Sync folder `dir` (relative to the repo top, '' = the top). Never rebases or rewrites commits.
+     * Returns one of: {nothing, branch} | {needsConfirm: 'branch', branch} (nothing changed) |
+     * {committed, branch, message, sha, pushed, ...details}. Throws GitError for a detached HEAD, a merge in progress or a failed commit.
+     * `confirm`: questions already answered yes (only 'branch'). `serial` wraps the local steps that touch the worktree, so the
+     * hub can run them in its own queue; the network steps (fetch, push) stay outside it.
      */
-    async commit(project, confirm = []) {
-      const folder = folderOf(project);
-      const branch = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-      if (branch === 'HEAD') throw new GitError('the repo is on a detached HEAD; check out a branch first');
-      for (const ref of ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
-        const busy = await run(['rev-parse', '-q', '--verify', ref]).then(() => true, () => false);
-        if (busy) throw new GitError(`the repo is in the middle of a ${ref.split('_')[0].toLowerCase().replace('cherry', 'cherry-pick')}; finish it first`);
-      }
-      if (!(await run(['status', '--porcelain', '--untracked-files=all', '--', folder])).trim()) return { nothing: true, branch };
-      const onBranch = branch === syncBranch;
-      if (!onBranch && !confirm.includes('branch')) return { needsConfirm: 'branch', branch, syncBranch };
-      await run(['add', '-A', '--', folder]);
-      try {
-        const names = (await run(['diff', '--cached', '--name-only', '-z', '--', folder])).split('\0').filter(Boolean);
-        const message = commitMessage(project, names.filter((n) => n.endsWith(EXT) || n.endsWith('.png')));
-        await run(['commit', '-q', '-m', message, '--', folder]);
-        const commit = (await run(['rev-parse', 'HEAD'])).trim();
-        return { committed: true, branch, message, sha: commit.slice(0, 7), commit, push: onBranch };
-      } catch (e) {
-        await run(['reset', '-q', '--', folder]).catch(() => {}); // leave nothing staged behind
-        throw e;
-      }
-    },
-
-    /**
-     * Publish the commit just made on the sync branch. Slow (network): run it outside the serial queue. Never throws.
-     * Plain push when the branch is exactly one commit (ours) ahead of origin; otherwise only the drawings go up.
-     */
-    push({ commit }) {
+    sync(dir, { confirm = [], serial = (fn) => fn() } = {}) {
       return oneAtATime(async () => {
-        try {
-          await run(['fetch', '-q', 'origin', syncBranch]);
-          const upstream = `origin/${syncBranch}`;
-          const ahead = await count(['rev-list', '--count', `${upstream}..${syncBranch}`]);
-          const fastForward = await run(['merge-base', '--is-ancestor', upstream, syncBranch]).then(() => true, () => false);
-          if (fastForward && ahead === 1) {
-            await run(['push', '-q', 'origin', `${commit}:refs/heads/${syncBranch}`]); // exactly this commit
-            return { pushed: true };
-          }
-          const r = await pushDrawingsOnly(commit);
-          await run(['fetch', '-q', 'origin', syncBranch]).catch(() => {});
-          return { ...r, keptLocal: Math.max(0, ahead - 1) };
-        } catch (e) {
-          return { pushed: false, pushError: e.message };
+        const branch = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+        if (branch === 'HEAD') throw new GitError('the repo is on a detached HEAD; check out a branch first');
+        for (const ref of ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+          if (await ok(['rev-parse', '-q', '--verify', ref])) throw new GitError(`the repo is in the middle of a ${ref.split('_')[0].toLowerCase().replace('cherry', 'cherry-pick')}; finish it first`);
         }
+        const specs = drawingPathspecs(dir);
+        const remote = (await run(['config', '--get', `branch.${branch}.remote`]).catch(() => '')).trim();
+        const merge = (await run(['config', '--get', `branch.${branch}.merge`]).catch(() => '')).trim();
+        const rbranch = merge.replace(/^refs\/heads\//, '');
+        const upstream = remote && remote !== '.' && rbranch ? { remote, rbranch } : null;
+
+        if (!autoBranches.includes(branch) && !confirm.includes('branch')) {
+          return (await changedFiles(run, dir, specs)).length ? { needsConfirm: 'branch', branch } : { nothing: true, branch };
+        }
+
+        const result = { branch };
+        // 1. Bring the checkout up to date when it is strictly behind, so our commit can go up as a plain push.
+        let fetchError = null;
+        if (upstream) {
+          try { await run(['fetch', '-q', upstream.remote, upstream.rbranch]); } catch (e) { fetchError = e.message; }
+          if (!fetchError) {
+            const target = `${upstream.remote}/${upstream.rbranch}`;
+            const [behind, ahead] = await Promise.all([count(['rev-list', '--count', `HEAD..${target}`]), count(['rev-list', '--count', `${target}..HEAD`])]);
+            if (behind > 0 && ahead === 0) {
+              try { await serial(() => run(['merge', '--ff-only', target])); result.fastForwarded = behind; } catch (e) { result.notUpdated = e.message; }
+            }
+          }
+        }
+        // 2. Commit the drawings and PNGs under the folder.
+        const committed = await serial(async () => {
+          const files = await changedFiles(run, dir, specs);
+          if (!files.length) return null;
+          await run([...LITERAL, 'add', '-A', '--', ...files]); // names from status are literal paths, never pathspec magic
+          try {
+            const message = commitMessage(dir ? path.posix.basename(dir) : path.basename((await run(['rev-parse', '--show-toplevel'])).trim()), files.filter((n) => n.endsWith('.excalidraw') || n.endsWith('.png')));
+            await run([...LITERAL, 'commit', '-q', '-m', message, '--', ...files]);
+            const commit = (await run(['rev-parse', 'HEAD'])).trim();
+            return { message, commit };
+          } catch (e) {
+            await run([...LITERAL, 'reset', '-q', '--', ...files]).catch(() => {}); // leave nothing staged behind
+            throw e;
+          }
+        });
+        if (!committed) return { ...result, nothing: true };
+        Object.assign(result, { committed: true, message: committed.message, sha: committed.commit.slice(0, 7), commit: committed.commit });
+        // 3. Publish.
+        if (!upstream) return { ...result, pushed: false, noUpstream: true, note: 'no upstream branch: committed locally only' };
+        if (fetchError) return { ...result, pushed: false, pushError: fetchError };
+        return { ...result, ...(await publish(committed.commit, upstream.remote, upstream.rbranch)) };
       });
     },
   };
