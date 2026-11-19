@@ -14,7 +14,7 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
    - Repo detection per root through `repoTopLevel`, with one git client and one queue per repo top level.
    - `recent` is updated on detach.
    - Tests rewritten: no primary; recent; repo vs non-repo roots; a root inside another root's repo.
-3. **Paths and naming** (`src/names.js`, `src/store.js`).
+3. **Paths and naming** (starts only after the user confirms the naming rule; see the spec's Decisions) (`src/names.js`, `src/store.js`).
    - `resolve(root, rel)` checks: inside the root, no `..`, real path inside the root.
    - The stem is the parent folder name; `latest` per folder.
    - Save, save-version and plain-save targets take a directory.
@@ -60,6 +60,7 @@ Each step ends green: `npm test`, and from step 8 on also `E2E_RUNTIME=native sc
     - It follows only the README, without reading `src/`.
     - It runs the native path on ports 3280/3200, then Docker on 3380/3300, because the real hub holds 3000/3080.
     - It attaches a scratch folder, saves, confirms the PNG, moves a drawing, and runs sync against a throwaway bare repo.
+    - It registers `scripts/mcp.sh` on the non-default canvas port, creates an element over MCP and confirms it appears in the hub's iframe. This is the end-to-end check that `CANVAS_PORT` works.
     - It reports every place it had to guess, then tears everything down.
     - Fix the README for each gap and rerun until a run needs no guesses.
 13. **Independent review** by another agent of the full diff against `development`; fix findings.

@@ -21,7 +21,7 @@ The hub knows nothing about any parent repo. A personal setup is just one state 
 - **The parent-side wrapper** proposed in the earlier standalone spec. It is not needed: the state file replaces it.
 
 ## Answers to the user's questions
-- **Why several `mcp_excalidraw` containers?** Each Claude Code session starts its own stdio MCP server, and the parent repo's MCP script does that with `docker run -i --rm`. Three sessions therefore run three randomly named containers. They are harmless: they hold no state and all talk to the one canvas, and `--rm` removes each when its session exits cleanly. A crashed session can leave one behind. The fix is in "Agent MCP" below: the hub ships `scripts/mcp.sh`, which runs the MCP server inside the existing canvas container (`docker compose exec`) or as a native process, so no container is created per session. Probed 2026-11-19: an MCP `initialize` sent through `docker exec -i <canvas> node dist/index.js` gets a valid answer, and the container count does not change.
+- **Why several `mcp_excalidraw` containers?** Each Claude Code session starts its own stdio MCP server, and the parent repo's MCP script does that with `docker run -i --rm`. Three sessions therefore run three randomly named containers. They are harmless: they hold no state and all talk to the one canvas, and `--rm` removes each when its session exits cleanly. A crashed session can leave one behind. The fix is in "Agent MCP" below: the hub ships `scripts/mcp.sh`, which runs the MCP server inside the existing canvas container (`docker compose exec`) or as a native process, so no container is created per session. Probed 2026-11-19, from the hub folder: `docker compose exec -T -u 1000:1000 -e EXPRESS_SERVER_URL=http://127.0.0.1:3000 -e EXCALIDRAW_EXPORT_DIR=/tmp canvas node dist/index.js` answers `initialize` and `tools/list`, and `docker ps` shows the same 8 containers before and after. Writing an export into a mounted `FOLDERS_ROOT` is not probed yet; plan step 10 checks it.
 - **Does sync use my checkout?** Yes. The folder you attach *is* your checkout; Docker bind-mounts it at the same path. ⟳ commits there and pushes from there, and when the remote is only ahead it fast-forwards your checkout too, so no manual pull is needed.
 
 ## Configuration: two files, split by who writes them
@@ -99,16 +99,18 @@ flowchart TD
   U -->|no| C0[commit F's drawings; done, message: no upstream, committed locally]
   U -->|yes| E[fetch upstream]
   E --> FF{"checkout strictly behind?"}
-  FF -->|yes| M["merge --ff-only @{u}: checkout updated"] --> C
+  FF -->|yes| M{"merge --ff-only upstream"}
+  M -->|ok: checkout updated| C
+  M -->|"refused (e.g. local edits)"| C
   FF -->|"no: even, or own unpushed commits"| C
-  C["commit F/**/*.excalidraw + *.png: '&lt;F name&gt; &lt;names&gt; diagram update'"] --> P{"local = upstream + our commit?"}
+  C["commit drawings + PNGs under F: 'F-name names diagram update'"] --> P{"local = upstream + our commit?"}
   P -->|yes| PP[plain push]
   P -->|"no: other unpushed commits, or remote moved meanwhile"| Q["drawings-only push (pushDrawingsOnly); other commits stay local; message: run git pull --rebase when ready"]
 ```
 
-- **Branch.** Sync uses whatever branch the checkout is on and pushes to that branch's upstream. `SYNC_BRANCH` is gone, and with it the "not on development" confirm. The user's rule: other sessions keep their own branches and rebase later; drawings are almost never touched on those branches.
+- **Branch.** Sync uses whatever branch the checkout is on and pushes to that branch's upstream. `SYNC_BRANCH` is gone, and with it the "not on the sync branch" confirm: if a checkout is on a feat branch, ⟳ commits and pushes there without asking. Optional guard (pending the user's choice): a per-folder `"branch"` pin in the state file; when set and the checkout is on another branch, ⟳ asks first, as today. The user's rule: other sessions keep their own branches and rebase later; drawings are almost never touched on those branches.
 - **Scope.** Only `*.excalidraw` and `*.png` under the clicked folder are staged. Today the whole folder is staged; this is narrowed because the explorer shows nothing else, so nothing invisible gets committed.
-- **Updating the local checkout.** Fetch first. If the checkout is strictly behind its upstream, `git merge --ff-only @{u}` brings it up to date before the commit, so the commit then goes up as a plain push and no manual pull is needed. If git refuses (for example, local edits would be overwritten), sync stops before committing and shows git's reason. With unpushed commits of its own, the checkout is left as is and only the drawings commit goes up (today's `pushDrawingsOnly`). The same happens when the remote moved between the fetch and the push. Rebase and autostash are never used: they would rewrite commits or move a branch under another session.
+- **Updating the local checkout.** Fetch first. If the checkout is strictly behind its upstream, `git merge --ff-only @{u}` brings it up to date before the commit, so the commit then goes up as a plain push and no manual pull is needed. If git refuses (for example, local edits would be overwritten), sync still commits and sends only the drawings commit up (`pushDrawingsOnly`), and the message says the checkout was not updated and why. A failed pull never blocks saving the drawings to the remote. With unpushed commits of its own, the checkout is left as is and only the drawings commit goes up (today's `pushDrawingsOnly`). The same happens when the remote moved between the fetch and the push. Rebase and autostash are never used: they would rewrite commits or move a branch under another session.
 - **Error handling, queueing, timeouts, no prompts (`BatchMode`) and the cherry-pick conflict rule** stay as in the current `git.js`.
 
 ## Hosting
@@ -182,7 +184,7 @@ flowchart TD
 | State file JSON, own code, no config library | It holds one list plus `recent`; `JSON.parse` and an atomic rename are enough (existing ~40 lines). |
 | View state in `localStorage` | It is per browser, changes on every drag, and needs no server writes; VS Code keeps layout per window the same way. |
 | Lazy tree listing per expanded folder | A repo root can be large (`node_modules`); listing only what is open scales with what is visible. |
-| Stem = parent folder name at any depth | User's answer 2026-11-19: "the root folder of any excalidraw file is the project … that's where it gets its name". |
+| Stem = parent folder name at any depth (**to confirm**: alternative is "any `<stem>_v<i>` is versioned per stem, the folder name is only the default for new saves") | User's answer 2026-11-19: "the root folder of any excalidraw file is the project … that's where it gets its name". Blocks plan step 3. |
 | Keep the file name on move | VS Code behaviour; a silent rename would surprise. The user can rename afterwards. |
 | Sync on the current branch, ff-only update, never rebase | User's answer 2026-11-19: commit in the local checkout and push; other sessions keep their branches. Rebase or autostash would rewrite commits or move a branch under another session. |
 | Stage only `*.excalidraw` and `*.png` | The explorer shows only drawings; committing files the user cannot see would be a surprise. |
