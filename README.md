@@ -42,10 +42,11 @@ cp .env.example .env     # then edit UID and GID in .env to the output of `id -u
 touch ~/.gitconfig && mkdir -p ~/.ssh     # compose mounts both; Docker would create missing ones as root-owned folders
 docker compose up -d --build
 ```
-The first build takes a few minutes. Then open http://localhost:3080. You see the header "Drawings" and a note "No folders yet" with an "+ Add folder" button; continue with [Use](#use). The hub and canvas start with Docker and restart after a crash. Stop everything with `docker compose down`.
+The first build takes a few minutes. Then open http://localhost:3080. You see the header "Drawings" and a note "No folders yet" with an "+ Add folder" button; continue with [Use](#use). The hub and canvas start with Docker and restart after a crash. Stop everything with `docker compose down`. Compose names the stack after the clone's folder, so two clones in folders with the same name (for example two `excalidraw-hub` folders) share one stack: give a second clone another folder name.
 
 What Docker mounts into the hub container (read-write unless noted), all at the same path as on your machine:
-- `FOLDERS_ROOT` (default your home folder): only folders inside it can be attached. Set it narrower, such as `/home/me/repos`, to limit what the container can write. The canvas container gets the same mount, so an agent's file exports land where your drawings are.
+- `FOLDERS_ROOT` (default your home folder): only folders inside it can be attached. Set it narrower, such as `/home/me/repos`, to limit what the container can write. The canvas container gets the same mount, so an agent's file exports land where your drawings are. While `FOLDERS_ROOT` is empty or unreadable the hub exits and Docker restarts it (this waits out Docker Desktop connecting the mount after a reboot), so `FOLDERS_ROOT` must hold at least one entry; until then http://localhost:3080 refuses connections.
+- Git remotes given as a local path (such as a bare repo `/home/me/backup.git`) must also lie inside `FOLDERS_ROOT`, or sync cannot reach them from the container. SSH and HTTPS remotes need nothing extra.
 - `./config` (the state file) and `BACKUPS_DIR` (copies for Revert).
 - `~/.gitconfig` and `~/.ssh`, read-only, so sync commits as you and pushes with your SSH key. The key needs no passphrase, because there is no ssh agent in the container.
 
@@ -67,7 +68,7 @@ Settings live in `.env` (copy of [.env.example](.env.example), gitignored; a var
 |---|---|---|
 | `UID`, `GID` | `1000` | Docker only: the user that runs the hub, so saved files are yours. Set them to `id -u` and `id -g` |
 | `HUB_PORT` | `3080` | Port of the hub page |
-| `CANVAS_PORT` | `3000` | Port of the canvas. The agent's Excalidraw MCP and the hub's iframe must use the same one |
+| `CANVAS_PORT` | `3000` | Port of the canvas. The agent's Excalidraw MCP and the hub's iframe must use the same one. Under Docker this is the host port; inside its container the canvas always listens on 3000, so `docker ps` shows `<CANVAS_PORT>->3000` |
 | `FOLDERS_ROOT` | your home folder (`$HOME`) | Absolute path. Folders can be attached only inside it. Docker mounts it read-write |
 | `HUB_STATE` | `./config/hub.json` | The state file (below). If you set it, use an absolute path; under Docker it must lie inside `FOLDERS_ROOT` |
 | `BACKUPS_DIR` | `./backups` | Copies of overwritten drawings, for Revert |
@@ -98,7 +99,7 @@ You may edit it while the hub is stopped, for example to keep a personal setup i
 - Within one folder, files with the same stem form a *family*; a folder may hold several. The highest `i` of a stem is tagged "latest". Files without `_v<i>` are tagged "unversioned"; they are listed, loadable and saveable.
 - The folder's own name is only the default stem: with nothing loaded from the selected folder, a save uses the folder's name as stem. With a drawing loaded from that folder, its stem is used.
 - **Save** (optional label first): with no label it overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk meanwhile. With a label, or with nothing loaded, it writes `<stem>[_<label>].excalidraw` and refuses if that file exists.
-- **Save new version** writes `<stem>_v<next>[_<label>].excalidraw` and never overwrites. For an unversioned loaded drawing, its whole name is the stem.
+- **Save new version** writes `<stem>_v<next>[_<label>].excalidraw` and never overwrites. `<next>` is one more than the stem's highest version in that folder, and `0` for a stem with no versions yet (the first version is `_v0`). For an unversioned loaded drawing, its whole name is the stem.
 - A stem must use letters, digits, `.`, `_` and `-` only; otherwise the save is refused and you rename the folder or the drawing. Loading still works.
 - Every save also writes `<name>.png` next to the drawing.
 - **Revert:** every overwrite first keeps the old file in `BACKUPS_DIR` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first and keeps the file it replaces too.
@@ -123,7 +124,7 @@ Start the hub first. The script then picks its mode:
 - **Native build present** (`scripts/native.sh install` done): it runs the MCP server as a local Node process against `CANVAS_PORT`.
 - **Neither:** it exits with "start the hub first". It also refuses a clone under `/mnt/...` (a Windows drive); clone inside the WSL filesystem.
 
-An agent can also save without any browser tab open: `POST /api/save` on the hub with `{"root": "<folder id>", "dir": "<folder relative to it>", "label": "...", "versioned": true}` (folder ids from `GET /api/folders`). Elements drawn in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save.
+An agent can also save without any browser tab open: `POST /api/save` on the hub with `{"root": "<folder id>", "dir": "<folder relative to it>", "label": "...", "versioned": true}` (folder ids from `GET /api/folders`; `dir` is `""` for the folder itself and must already exist). Folders can be attached and detached the same way: `POST /api/folders/attach` with `{"path": "/home/me/repo/docs/drawings"}`, `POST /api/folders/detach` with `{"id": "<folder id>"}`. The hub accepts only JSON bodies (`content-type: application/json`) from `localhost`. To draw without the MCP tools, use the canvas's own REST API: `POST http://localhost:<CANVAS_PORT>/api/elements` with one element (`{"type": "rectangle", "x": 0, "y": 0, "width": 120, "height": 60}`), `GET .../api/elements` to list them. Elements drawn in MCP shorthand (labels, arrow `start`/`end`) are expanded into normal Excalidraw elements on save.
 
 ## Test
 ```bash
