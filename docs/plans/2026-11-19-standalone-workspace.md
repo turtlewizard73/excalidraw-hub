@@ -83,3 +83,44 @@ Each step ends green: unit tests (Docker command in the README, or `npm test` wi
 - The tree with drag and drop is the largest UI change so far for a no-build page, so `app.js` might outgrow one file. If it passes about 500 lines, split the explorer into `public/explorer.js` (an ES module, still no build step).
 - `git check-ignore` costs one call per expanded folder of a repo root. That is acceptable at today's sizes; cache per folder until the next refresh if it gets slow.
 - Mounting `FOLDERS_ROOT` into the canvas container widens what that container can write. This is documented, and `FOLDERS_ROOT` narrows it.
+
+## Outcome
+Steps 0–13 and 15 are done on `feat/standalone-workspace`. Step 14 (the maintainer's cutover) waits for the maintainer's go and the merge into `development`.
+
+**Done.** Everything in the spec is implemented:
+- the config module, and the workspace (v2 state file, no primary folder, `recent`);
+- drawings at any depth, named by stem per folder;
+- the lazy tree, and move with its `.png` and backups;
+- sync on the current branch (ff-only, drawings-only push);
+- the `{root, path}` API and the explorer UI;
+- the e2e harness on a v2 `HUB_STATE`;
+- compose and `native.sh` ports, `scripts/mcp.sh`, neutral fixtures, the README and screenshots.
+
+Final gates on the branch: unit 141/141 in Docker, `scripts/e2e.sh` 28 + 1 (the restart phase) passed, and `git grep -inE '<parent name>|<home path>'` empty, including commit messages.
+
+**Differences from the plan.**
+- **E2e gate.** E2e was red from step 1 to step 8: dropping the old env vars and the primary folder broke the harness, and the spec forbids compatibility shims. The unit tests were green at every commit. Red commits stayed local until step 8.
+- **Sync confirm.** `POST /api/sync` takes an optional `confirm: ['branch']`. The spec table says "no confirm", but the question asked on a non-auto branch needs a second call.
+- **Git clients.** Roots in one repo share one git client and one queue. The spec said "own client"; one queue per repo still holds.
+- **Backups key** (review finding). A drawing's backups live under its full file name: `BACKUPS_DIR/<id>/<dir>/<file>.excalidraw/<ts>.excalidraw`, with `_reverted/<dir>/<file>.excalidraw/` and `_retired/<dir>/<file>.excalidraw-<stamp>/`. With `<base>/` as the key, a drawing `x.excalidraw` collided with a sibling folder `x/`.
+- **Other review fixes:**
+  - `..` is checked as a whole path segment;
+  - `--literal-pathspecs` is used for file names taken from `git status`;
+  - dot-folder targets are refused;
+  - the "checkout not updated" note is shown on every sync result.
+- **Not fixed (decided):** a state entry that is missing at start is not re-validated when it reappears. This needs write access inside `FOLDERS_ROOT`, and only the folder list is at stake.
+- **Smaller changes:**
+  - The restart e2e runs as a second phase after `docker compose restart hub`.
+  - The test env var `REPO_DIR` was renamed `GIT_REPO_DIR`.
+  - The tooltip for "Save new version" says `_v0, _v1, ...`, because the first version is `_v0`.
+- **Install check (step 12)** took three runs, each by a fresh agent following only the README, with native in a `node:20` container. Runs 1 and 2 found 6 and 3 README gaps. Among them: an empty `FOLDERS_ROOT` restart-loops under Docker, a local-path `origin` must lie inside `FOLDERS_ROOT`, the native `.env` step, a failed push is not retried, the attach API, and the stack name comes from the clone folder. Run 3 needed no guesses.
+
+**Not run.**
+- `E2E_RUNTIME=native` (no Node on the dev machine).
+- The drop highlight under a real mouse drag (synthetic events only).
+- Browsers other than Chromium.
+
+**Learned.**
+- Compose names the stack after the clone folder. A second clone in a folder of the same name takes over the first stack's containers. Test clones need other folder names.
+- The loopback binding means a native run inside a container is reachable only from the same network namespace. Under Docker Desktop, `--network host` is the VM's loopback, not WSL's.
+- The MCP's `export_scene` with no browser tab open exported 0 elements while the canvas held 1. This is upstream behaviour; the write into the mounted `FOLDERS_ROOT` works.
