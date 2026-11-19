@@ -285,6 +285,7 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       const dest = folderOf(to.root);
       const rel = str(from.path, 'from.path');
       const newRel = join(str(to.dir ?? '', 'to.dir'), basename(rel));
+      if (dest.backups.isReserved(newRel)) throw new HttpError(400, `${JSON.stringify(to.dir)} is a reserved folder name (_reverted, _retired at the top of a root); pick another folder`);
       if (src === dest && newRel === rel) return { moved: false, root: to.root, path: rel, current: baseline.current };
       try { await moveDrawing(src.store, rel, dest.store, newRel); } catch (e) { throw fsError(e); }
       await src.backups.move(rel, newRel, dest.backups).catch((e) => console.error('moving backups failed:', e.message));

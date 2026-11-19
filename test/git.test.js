@@ -268,3 +268,14 @@ test('a file whose name looks like pathspec magic is committed as the plain file
   assert.deepEqual(sh('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), [`${F}/:(exclude)odd_v1.excalidraw`, `${F}/plain_v1.excalidraw`]);
   assert.equal(sh('status', '--porcelain').trim(), '');
 });
+
+test('a conflicting drawing with a pathspec-like name is resolved as the plain file (drawings-only push)', { skip: !hasGit }, async () => {
+  const odd = `${F}/:(exclude)odd_v0.excalidraw`;
+  await write(odd, 'base'); sh('add', '-A'); sh('commit', '-qm', 'odd'); sh('push', '-q');
+  await elsewhere({ [odd]: 'theirs' });
+  await write('notes.md', 'wip'); sh('add', 'notes.md'); sh('commit', '-qm', 'wip');
+  await write(odd, 'ours');
+  const r = await git.sync(F);
+  assert.deepEqual([r.pushed, r.onlyDrawings], [true, true]);
+  assert.equal(rgit('show', `dev:${odd}`), 'ours');
+});

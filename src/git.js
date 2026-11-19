@@ -110,8 +110,8 @@ export function createGit({ run, autoBranches = ['development', 'dev'] }) {
         if (!conflicted.length) throw new GitError('cherry-pick onto the remote failed without conflicts');
         for (const f of conflicted) {
           const inOurs = await ok(['cat-file', '-e', `${sha}:${f}`]);
-          await w(inOurs ? ['checkout', sha, '--', f] : ['rm', '-q', '--', f]);
-          if (inOurs) await w(['add', '--', f]);
+          await w(inOurs ? [...LITERAL, 'checkout', sha, '--', f] : [...LITERAL, 'rm', '-q', '--', f]); // cat-file takes an object name, not a pathspec: no flag there
+          if (inOurs) await w([...LITERAL, 'add', '--', f]);
         }
         await w(['-c', 'core.editor=true', 'cherry-pick', '--continue']);
       }

@@ -85,3 +85,43 @@ test('layout: <root>/<dir>/<file name>/<timestamp>.excalidraw, retired and rever
   assert.ok(all.includes('_reverted/a/b/y_v1.excalidraw/<ts>.excalidraw'));
   assert.ok(all.some((p) => /^_retired\/x_v0\.excalidraw-<ts>\/<ts>\.excalidraw$/.test(p)), all.join(' '));
 });
+
+test('two retires of one name in the same millisecond both survive (suffix _2)', async () => {
+  const dir = await tmpdir();
+  const frozen = () => new Date('2026-01-01T00:00:00.000Z');
+  const b = createBackups(dir, 20, frozen);
+  await b.save('x.excalidraw', Buffer.from('1'));
+  await b.retire('x.excalidraw');
+  await b.save('x.excalidraw', Buffer.from('2'));
+  await b.retire('x.excalidraw');
+  assert.equal(await b.count('x.excalidraw'), 0, 'nothing left under the live key');
+  assert.deepEqual((await fs.readdir(path.join(dir, '_retired'))).sort(), ['x.excalidraw-2026-01-01T00-00-00-000Z', 'x.excalidraw-2026-01-01T00-00-00-000Z_2']);
+});
+
+test('reserved folders have no backups: count, list, newest, retire and move are quiet no-ops; save is refused', async () => {
+  const dir = await tmpdir();
+  const b = createBackups(dir);
+  await b.save('a.excalidraw', Buffer.from('1'));
+  for (const rel of ['_retired/x.excalidraw', '_reverted/a/y.excalidraw']) {
+    assert.equal(await b.count(rel), 0);
+    assert.equal(await b.newest(rel), null);
+    await b.retire(rel);
+    await assert.rejects(b.save(rel, Buffer.from('')), /reserved/);
+    assert.equal(b.isReserved(rel), true);
+  }
+  assert.equal(b.isReserved('_retired.excalidraw'), false, 'a drawing at the top is not in a reserved folder');
+  await b.move('a.excalidraw', '_retired/a.excalidraw');
+  await b.move('_retired/a.excalidraw', 'a.excalidraw');
+  assert.equal(await b.count('a.excalidraw'), 1, 'history untouched');
+});
+
+test('a folder inside a backup folder is not a backup', async () => {
+  const dir = await tmpdir();
+  const b = createBackups(dir, 2);
+  await b.save('x.excalidraw', Buffer.from('real'));
+  await fs.mkdir(path.join(dir, 'x.excalidraw', 'zzz.excalidraw'));
+  assert.equal(await b.count('x.excalidraw'), 1);
+  assert.equal(String((await b.newest('x.excalidraw')).bytes), 'real');
+  for (let i = 0; i < 3; i++) await b.save('x.excalidraw', Buffer.from(`n${i}`));
+  await fs.access(path.join(dir, 'x.excalidraw', 'zzz.excalidraw'));
+});

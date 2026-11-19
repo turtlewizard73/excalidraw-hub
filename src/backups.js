@@ -11,9 +11,12 @@ import { EXT } from './names.js';
 const RESERVED = new Set(['_reverted', '_retired']);
 const badSegment = (s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s);
 
-export function createBackups(dir, keep = 20) {
+/** `now` is replaceable for tests (a frozen clock). */
+export function createBackups(dir, keep = 20, now = () => new Date()) {
   const root = path.resolve(dir);
-  const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+  const stamp = () => now().toISOString().replace(/[:.]/g, '-');
+  /** Drawings inside a top-level _reverted or _retired folder have no backups (the names are reserved). */
+  const reserved = (rel) => typeof rel === 'string' && rel.includes('/') && RESERVED.has(rel.split('/')[0]);
 
   /** The backups folder of drawing `rel` ("dir/x.excalidraw", POSIX), optionally in an area (_reverted, _retired). */
   function folder(rel, area = '') {
@@ -26,8 +29,9 @@ export function createBackups(dir, keep = 20) {
   const exists = (p) => fs.lstat(p).then(() => true, () => false);
 
   async function list(rel) {
-    const names = await fs.readdir(folder(rel)).catch((e) => { if (e.code === 'ENOENT') return []; throw e; });
-    return names.filter((n) => n.endsWith(EXT)).sort(); // timestamp names: oldest first
+    if (reserved(rel)) return [];
+    const entries = await fs.readdir(folder(rel), { withFileTypes: true }).catch((e) => { if (e.code === 'ENOENT') return []; throw e; });
+    return entries.filter((e) => e.isFile() && e.name.endsWith(EXT)).map((e) => e.name).sort(); // timestamp names: oldest first
   }
 
   async function write(dirPath, bytes, limit) {
@@ -37,7 +41,7 @@ export function createBackups(dir, keep = 20) {
     for (let i = 2; await exists(path.join(dirPath, name)); i++) name = `${t}_${i}${EXT}`;
     await fs.writeFile(path.join(dirPath, name), bytes, { flag: 'wx' });
     if (limit) {
-      const all = (await fs.readdir(dirPath)).filter((n) => n.endsWith(EXT)).sort();
+      const all = (await fs.readdir(dirPath, { withFileTypes: true })).filter((e) => e.isFile() && e.name.endsWith(EXT)).map((e) => e.name).sort();
       for (const old of all.slice(0, Math.max(0, all.length - limit))) await fs.unlink(path.join(dirPath, old)).catch(() => {});
     }
     return name;
@@ -45,9 +49,12 @@ export function createBackups(dir, keep = 20) {
 
   /** Move a drawing's backups out of Revert's reach (into _retired). */
   async function retire(rel) {
+    if (reserved(rel)) return;
     const src = folder(rel);
     if (!(await exists(src))) return;
-    const dest = folder(rel, '_retired') + `-${stamp()}`;
+    const base = folder(rel, '_retired') + `-${stamp()}`;
+    let dest = base;
+    for (let i = 2; await exists(dest); i++) dest = `${base}_${i}`; // two retires in one millisecond
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.rename(src, dest);
   }
@@ -77,6 +84,7 @@ export function createBackups(dir, keep = 20) {
 
     /** Backups follow a renamed or moved drawing, also into another root's backups (`to`). Anything already at the new name is retired first. */
     async move(rel, newRel, to = this) {
+      if (reserved(rel) || to.isReserved(newRel)) return; // no backups there
       const src = folder(rel);
       const dest = to.folderOf(newRel);
       if (src === dest || !(await exists(src))) return; // same place: nothing to do, and never retire our own history
@@ -84,6 +92,8 @@ export function createBackups(dir, keep = 20) {
       await fs.mkdir(path.dirname(dest), { recursive: true });
       await fs.rename(src, dest);
     },
+
+    isReserved: reserved,
 
     /** Where the backups of `rel` live (used by move). */
     folderOf: (rel) => folder(rel),

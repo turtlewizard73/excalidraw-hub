@@ -733,3 +733,13 @@ test('a folder named ..cache is not "outside"; a sibling like ..x does not overl
   assert.equal((await post('/api/folders/attach', { path: path.join(r, 'sub') })).status, 200);
   assert.equal((await post('/api/folders/attach', { path: path.join(r, '..x') })).status, 200, 'not an overlap');
 });
+
+test('a root-level _retired folder lists fine; moving a drawing into it is refused and nothing moves', async () => {
+  await fs.mkdir(path.join(dir, '_retired'));
+  await fs.writeFile(path.join(dir, '_retired', 'old_v0.excalidraw'), JSON.stringify({ elements: [] }));
+  const tree = await get(`/api/tree?root=${rid}&path=_retired`);
+  assert.deepEqual(tree.drawings.map((d) => [d.file, d.backups]), [['old_v0.excalidraw', 0]]);
+  const res = await post('/api/move', { from: at(BP), to: { root: rid, dir: '_retired' } });
+  assert.equal(res.status, 400);
+  await fs.access(path.join(dir, BP));
+});
