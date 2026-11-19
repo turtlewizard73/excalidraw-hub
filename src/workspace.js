@@ -19,7 +19,7 @@ const labelOf = (p) => {
   if (parts.length > 2 && parts.at(-1) === 'drawings' && parts.at(-2) === 'docs') return parts.at(-3);
   return parts.at(-1) ?? p;
 };
-const inside = (root, p) => { const rel = path.relative(root, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
+const inside = (root, p) => { const rel = path.relative(root, p); return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)); };
 
 /**
  * @param {{backupsDir: string, foldersRoot: string, file?: string, autoSyncBranches?: string[], log?: (s: string) => void, repoTop?: Function}} opts

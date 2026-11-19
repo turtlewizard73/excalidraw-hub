@@ -50,8 +50,10 @@ async function requireFile(p, label) {
 }
 
 
-const insideDir = (dir, p) => { const rel = path.relative(dir, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
+const insideDir = (dir, p) => { const rel = path.relative(dir, p); return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)); };
 const badSegment = (s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s);
+/** Folders and drawings are created or moved only into visible folders: the explorer hides dot-folders, so a target in one would vanish. */
+const refuseDot = (rel) => { if (rel.split('/').some((seg) => seg.startsWith('.'))) throw new StoreError(400, `${JSON.stringify(rel)}: hidden (dot) folders are not a target`); };
 const hasExt = (rel) => typeof rel === 'string' && rel.endsWith(EXT) && rel.split('/').at(-1).length > EXT.length;
 
 /** Rename `a` to `b`; across drives (EXDEV) copy, fsync and unlink instead. Never overwrites an existing `b` on the copy path. */
@@ -72,6 +74,7 @@ async function moveFile(a, b, rename) {
  */
 export async function moveDrawing(src, rel, dest, newRel, { rename = fs.rename } = {}) {
   if (!hasExt(rel) || !hasExt(newRel)) throw new StoreError(400, 'not a drawing path');
+  refuseDot(newRel);
   const from = await src.resolve(rel);
   const to = await dest.resolve(newRel);
   if (!(await isFile(from))) throw new StoreError(404, `${rel} not found`);
@@ -135,6 +138,7 @@ export function createStore(rootDir, { rename = fs.rename } = {}) {
     /** Create folder `rel` inside an existing parent. The new name must be safe; refuses an existing one (409). */
     async mkdir(rel) {
       const p = await resolve(rel);
+      refuseDot(rel);
       if (rel === '' || !isSafeName(rel.split('/').at(-1))) throw new StoreError(400, `invalid folder name: ${JSON.stringify(rel.split('/').at(-1) ?? rel)}`);
       const parent = await fs.lstat(path.dirname(p)).catch(() => null);
       if (!parent?.isDirectory()) throw new StoreError(404, `the parent folder of ${rel} does not exist`);
@@ -159,6 +163,7 @@ export function createStore(rootDir, { rename = fs.rename } = {}) {
     /** Write a new file (safe name); never overwrites. */
     async create(rel, doc) {
       const p = await drawing(rel);
+      refuseDot(rel);
       if (!isSafeName(rel.split('/').at(-1).slice(0, -EXT.length))) throw new StoreError(400, `invalid drawing name: ${JSON.stringify(path.basename(rel))}`);
       const dir = await fs.lstat(path.dirname(p)).catch(() => null);
       if (!dir?.isDirectory()) throw new StoreError(404, `the folder of ${rel} does not exist`);

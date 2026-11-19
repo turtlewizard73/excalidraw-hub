@@ -57,6 +57,7 @@ export function commitMessage(label, paths) {
   return `${label} ${shown} diagram update`;
 }
 
+const LITERAL = ['--literal-pathspecs'];
 const escapeGlob = (s) => s.replace(/[\\*?[\]]/g, '\\$&');
 /** Pathspecs for the drawings and PNGs under `dir` (relative to the repo top, '' = the top), directly in it and at any depth. */
 export function drawingPathspecs(dir) {
@@ -187,14 +188,14 @@ export function createGit({ run, autoBranches = ['development', 'dev'] }) {
         const committed = await serial(async () => {
           const files = await changedFiles(run, dir, specs);
           if (!files.length) return null;
-          await run(['add', '-A', '--', ...files]);
+          await run([...LITERAL, 'add', '-A', '--', ...files]); // names from status are literal paths, never pathspec magic
           try {
             const message = commitMessage(dir ? path.posix.basename(dir) : path.basename((await run(['rev-parse', '--show-toplevel'])).trim()), files.filter((n) => n.endsWith('.excalidraw') || n.endsWith('.png')));
-            await run(['commit', '-q', '-m', message, '--', ...files]);
+            await run([...LITERAL, 'commit', '-q', '-m', message, '--', ...files]);
             const commit = (await run(['rev-parse', 'HEAD'])).trim();
             return { message, commit };
           } catch (e) {
-            await run(['reset', '-q', '--', ...files]).catch(() => {}); // leave nothing staged behind
+            await run([...LITERAL, 'reset', '-q', '--', ...files]).catch(() => {}); // leave nothing staged behind
             throw e;
           }
         });

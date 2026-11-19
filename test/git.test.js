@@ -188,7 +188,7 @@ test('an unreachable remote keeps the commit and reports git\'s error', { skip: 
 test('a failed commit leaves nothing staged', { skip: !hasGit }, async () => {
   await write(`${F}/chartroom_v1.excalidraw`);
   const real = gitRunner(repo);
-  const failing = createGit({ run: async (args) => { if (args[0] === 'commit') throw new Error('hook said no'); return real(args); } });
+  const failing = createGit({ run: async (args) => { if (args.includes('commit')) throw new Error('hook said no'); return real(args); } });
   await assert.rejects(failing.sync(F), /hook said no/);
   assert.equal(sh('diff', '--cached', '--name-only').trim(), '');
 });
@@ -259,4 +259,12 @@ test('gitIgnored: asks git once; returns the ignored ones, nothing when git fail
   assert.deepEqual([...await gitIgnored(repo, ['keep/'])], []);
   assert.deepEqual([...await gitIgnored(path.join(tmp, 'missing'), ['a/'])], []);
   assert.deepEqual([...await gitIgnored(repo, [])], []);
+});
+
+test('a file whose name looks like pathspec magic is committed as the plain file it is', { skip: !hasGit }, async () => {
+  await write(`${F}/:(exclude)odd_v1.excalidraw`); await write(`${F}/plain_v1.excalidraw`);
+  const r = await git.sync(F);
+  assert.equal(r.committed, true);
+  assert.deepEqual(sh('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), [`${F}/:(exclude)odd_v1.excalidraw`, `${F}/plain_v1.excalidraw`]);
+  assert.equal(sh('status', '--porcelain').trim(), '');
 });

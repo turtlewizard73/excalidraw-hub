@@ -310,7 +310,7 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       if (!folder.git) throw new HttpError(404, `git sync is off for this folder: ${folder.syncError ?? 'not in a git repository'}`);
       try { await folder.store.resolve(str(rel, 'path')); } catch (e) { throw fsError(e); }
       const dir = path.relative(folder.repoDir, path.join(folder.path, ...(rel ? rel.split('/') : []))).split(path.sep).join('/');
-      if (dir.startsWith('..')) throw new HttpError(400, 'the folder is outside its repository');
+      if (dir === '..' || dir.startsWith('../')) throw new HttpError(400, 'the folder is outside its repository');
       const answered = Array.isArray(confirm) ? confirm.filter((c) => c === 'branch') : [];
       try { return await folder.git.sync(dir, { confirm: answered, serial: serialRun }); } catch (e) {
         if (e instanceof GitError) throw new HttpError(500, e.message);

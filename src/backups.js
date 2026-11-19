@@ -1,8 +1,9 @@
 // Copies of drawings taken before they are overwritten, for Revert. Outside the drawings folder, which may be git-tracked.
-// A drawing is named by its path relative to its root ("a/b/x.excalidraw"). Layout: <root>/<dir>/<base>/<timestamp>.excalidraw,
-// so a drawing's history follows the same folders. <root>/_reverted and <root>/_retired hold copies Revert never reads:
+// A drawing is named by its path relative to its root ("a/b/x.excalidraw"). Layout: <root>/<dir>/<file name>/<timestamp>.excalidraw,
+// e.g. a/b/x.excalidraw/2026-01-01T00-00-00-000Z.excalidraw. The folder keeps the full file name, because a file and a folder of the
+// same name cannot sit in one directory: a drawing x.excalidraw never shares its backup key with a folder x/ that holds drawings. <root>/_reverted and <root>/_retired hold copies Revert never reads:
 // _reverted (the file a revert replaced) and _retired (backups of deleted drawings, or of a name created anew).
-// A drawing directly in a folder named _reverted or _retired of the drawings root has no backups (the name is reserved).
+// A drawing inside a top-level folder named _reverted or _retired of the drawings root has no backups (the name is reserved).
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EXT } from './names.js';
@@ -19,8 +20,8 @@ export function createBackups(dir, keep = 20) {
     const segs = typeof rel === 'string' ? rel.split('/') : [];
     const file = segs.pop() ?? '';
     if (!file.endsWith(EXT) || file === EXT || badSegment(file) || segs.some(badSegment)) throw new Error(`invalid backup name ${JSON.stringify(rel)}`);
-    if (!area && RESERVED.has(segs[0] ?? file.slice(0, -EXT.length))) throw new Error(`${segs[0] ?? file} is a reserved folder name for backups`);
-    return path.join(root, area, ...segs, file.slice(0, -EXT.length));
+    if (!area && RESERVED.has(segs[0])) throw new Error(`${segs[0]} is a reserved folder name for backups`);
+    return path.join(root, area, ...segs, file);
   }
   const exists = (p) => fs.lstat(p).then(() => true, () => false);
 
@@ -77,9 +78,9 @@ export function createBackups(dir, keep = 20) {
     /** Backups follow a renamed or moved drawing, also into another root's backups (`to`). Anything already at the new name is retired first. */
     async move(rel, newRel, to = this) {
       const src = folder(rel);
-      if (!(await exists(src))) return;
-      await to.retire(newRel);
       const dest = to.folderOf(newRel);
+      if (src === dest || !(await exists(src))) return; // same place: nothing to do, and never retire our own history
+      await to.retire(newRel);
       await fs.mkdir(path.dirname(dest), { recursive: true });
       await fs.rename(src, dest);
     },

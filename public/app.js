@@ -293,10 +293,11 @@ async function syncFolder(f, path, answered = []) {
     if (res.needsConfirm) {
       return confirm(`Commit and push ${label} on branch ${res.branch}?`) ? syncFolder(f, path, [...answered, res.needsConfirm]) : say(`Sync of ${label} cancelled; nothing changed`);
     }
-    if (res.nothing) { say(`Nothing to sync in ${label}${res.fastForwarded ? ` (checkout updated: ${res.fastForwarded} commit(s) pulled)` : ''}`); return refreshList(); } // a fast-forward may have brought new files
-    const pulled = res.fastForwarded ? `; checkout updated (${res.fastForwarded} commit(s) pulled)` : res.notUpdated ? `; checkout not updated: ${res.notUpdated}` : '';
-    if (res.noUpstream) say(`Committed "${res.message}" on ${res.branch} (${res.sha}), no upstream branch: not pushed`);
-    else if (!res.pushed) fail('Push', new Error(`Committed "${res.message}" (${res.sha}), but the push failed:\n${res.pushError}`));
+    const notUpdated = res.notUpdated ? `; checkout not updated: ${res.notUpdated}` : '';
+    if (res.nothing) { say(`Nothing to sync in ${label}${res.fastForwarded ? ` (checkout updated: ${res.fastForwarded} commit(s) pulled)` : ''}${notUpdated}`); return refreshList(); } // a fast-forward may have brought new files
+    const pulled = res.fastForwarded ? `; checkout updated (${res.fastForwarded} commit(s) pulled)` : notUpdated;
+    if (res.noUpstream) say(`Committed "${res.message}" on ${res.branch} (${res.sha}), no upstream branch: not pushed${pulled}`);
+    else if (!res.pushed) fail('Push', new Error(`Committed "${res.message}" (${res.sha}), but the push failed${pulled}:\n${res.pushError}`));
     else {
       const extra = res.onlyDrawings ? `. Only the drawings went up${res.keptLocal ? `; your ${res.keptLocal} other local commit(s) stay unpushed` : ''}. Run "git pull --rebase" on ${res.branch} before you push it yourself.` : '';
       say(`Synced: "${res.message}" (${res.sha}) pushed to ${res.branch}${pulled}${extra}`);

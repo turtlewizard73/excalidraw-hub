@@ -109,7 +109,7 @@ test('switching saves unsaved work into the loaded drawing first, backing up the
   const saved = await readDoc(BP);
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'x']);
   assert.deepEqual([...canvas.state.elements.keys()], ['o'], 'then the other drawing is loaded');
-  const bdir = path.join(backupsDir, rid, 'roadmap', 'roadmap_v0_plan');
+  const bdir = path.join(backupsDir, rid, 'roadmap', 'roadmap_v0_plan.excalidraw');
   const [backup] = await fs.readdir(bdir);
   assert.deepEqual(await fs.readFile(path.join(bdir, backup)), original, 'the old file is kept byte for byte');
   const listed = (await get(`/api/tree?root=${rid}&path=roadmap`)).drawings.find((d) => d.file === 'roadmap_v0_plan.excalidraw');
@@ -181,7 +181,7 @@ test('revert restores the newest backup step by step and keeps what it replaced'
   assert.deepEqual(await fs.readFile(file), v1);
   const none = await post('/api/revert', at(BP));
   assert.equal(none.status, 404);
-  const kdir = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan');
+  const kdir = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan.excalidraw');
   const kept = await fs.readdir(kdir);
   const keptBytes = await Promise.all(kept.map((n) => fs.readFile(path.join(kdir, n))));
   assert.deepEqual(keptBytes.map(String).sort(), [v2, v3].map(String).sort(), 'every replaced state is kept');
@@ -199,7 +199,7 @@ test('revert with unsaved edits restores the last saved state and keeps the edit
   assert.equal((await res.json()).remaining, 1, 'the earlier backup is still there');
   assert.deepEqual(await fs.readFile(file), lastSaved);
   assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'c']);
-  const dirR = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan');
+  const dirR = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan.excalidraw');
   const [kept] = await fs.readdir(dirR);
   assert.ok(JSON.parse(await fs.readFile(path.join(dirR, kept), 'utf8')).elements.some((e) => e.id === 'edit'), 'the unsaved edit is kept');
   await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [] }));
@@ -617,7 +617,7 @@ describe('folders, mkdir and move', () => {
     const save = await (await post('/api/save', { root: otherId, dir: 'roadmap', versioned: false })).json();
     assert.deepEqual(save.current, { root: otherId, path: OP }, 'overwrites the loaded drawing in its root');
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(other, OP), 'utf8')).elements.map((e) => e.id).sort(), ['other', 'z']);
-    assert.equal((await fs.readdir(path.join(backupsDir, otherId, 'roadmap', 'roadmap_v0'))).length, 1);
+    assert.equal((await fs.readdir(path.join(backupsDir, otherId, 'roadmap', 'roadmap_v0.excalidraw'))).length, 1);
     assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png'], 'the first root is untouched');
     canvas.state.elements.set('w', rect('w'));
     const cross = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json();
@@ -694,4 +694,42 @@ describe('folders, mkdir and move', () => {
     await fs.access(path.join(dir, BP));
     await fs.access(path.join(dir, 'roadmap', 'roadmap_v0_plan.png'));
   });
+});
+
+test('a drawing and a folder of the same base name keep separate Revert history; a same-name rename keeps its own', async () => {
+  await fs.mkdir(path.join(dir, 'roadmap', 'roadmap_v0_plan'));
+  await fs.writeFile(path.join(dir, 'roadmap', 'roadmap_v0_plan', 'inner_v0.excalidraw'), JSON.stringify({ elements: [rect('i')] }));
+  const inner = 'roadmap/roadmap_v0_plan/inner_v0.excalidraw';
+  await post('/api/load', at(inner));
+  canvas.state.elements.set('c', rect('c'));
+  await post('/api/save', { root: rid, dir: 'roadmap/roadmap_v0_plan', versioned: false });
+  const count = async (d, f) => (await get(`/api/tree?root=${rid}&path=${d}`)).drawings.find((x) => x.file === f).backups;
+  assert.equal(await count('roadmap/roadmap_v0_plan', 'inner_v0.excalidraw'), 1);
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('d', rect('d'));
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
+  assert.equal(await count('roadmap', 'roadmap_v0_plan.excalidraw'), 1);
+  const same = await post('/api/rename', { ...at(BP), newBase: 'roadmap_v0_plan' });
+  assert.equal(same.status, 200);
+  assert.equal(await count('roadmap', 'roadmap_v0_plan.excalidraw'), 1, 'same-name rename keeps the history');
+  await post('/api/delete', at(BP));
+  assert.equal(await count('roadmap/roadmap_v0_plan', 'inner_v0.excalidraw'), 1, 'deleting the drawing leaves the folder\'s history');
+});
+
+test('mkdir and move targets inside hidden (dot) folders are refused', async () => {
+  await fs.mkdir(path.join(dir, '.hid'));
+  assert.equal((await post('/api/mkdir', { root: rid, path: '.hid/x' })).status, 400);
+  assert.equal((await post('/api/mkdir', { root: rid, path: '.newhid' })).status, 400);
+  assert.equal((await post('/api/move', { from: at(BP), to: { root: rid, dir: '.hid' } })).status, 400);
+  await fs.access(path.join(dir, BP));
+  assert.deepEqual(await fs.readdir(path.join(dir, '.hid')), []);
+});
+
+test('a folder named ..cache is not "outside"; a sibling like ..x does not overlap a root', async () => {
+  await fs.mkdir(path.join(dir, '..cache'));
+  await fs.writeFile(path.join(dir, '..cache', 'c_v0.excalidraw'), JSON.stringify({ elements: [] }));
+  assert.equal((await post('/api/load', at('..cache/c_v0.excalidraw'))).status, 200);
+  const r = path.join(home, 'r'); await fs.mkdir(path.join(r, 'sub'), { recursive: true }); await fs.mkdir(path.join(home, 'r', '..x'));
+  assert.equal((await post('/api/folders/attach', { path: path.join(r, 'sub') })).status, 200);
+  assert.equal((await post('/api/folders/attach', { path: path.join(r, '..x') })).status, 200, 'not an overlap');
 });
