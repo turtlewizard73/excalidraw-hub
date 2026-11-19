@@ -42,7 +42,7 @@ cp .env.example .env     # then edit UID and GID in .env to the output of `id -u
 touch ~/.gitconfig && mkdir -p ~/.ssh     # compose mounts both; Docker would create missing ones as root-owned folders
 docker compose up -d --build
 ```
-The first build takes a few minutes. Then open http://localhost:3080. You see the header "Drawings" and a note "No folders yet" with an "+ Add folder" button; continue with [Use](#use). The hub and canvas start with Docker and restart after a crash. Stop everything with `docker compose down`. Compose names the stack after the clone's folder, so two clones in folders with the same name (for example two `excalidraw-hub` folders) share one stack: give a second clone another folder name.
+The first build takes a few minutes. Then open http://localhost:3080 (the canvas shows "Loading canvas" for a few seconds before "Connected"). You see the header "Drawings" and a note "No folders yet" with an "+ Add folder" button; continue with [Use](#use). The hub and canvas start with Docker and restart after a crash. Stop everything with `docker compose down`. Compose names the stack after the clone's folder, so two clones in folders with the same name (for example two `excalidraw-hub` folders) share one stack: give a second clone another folder name.
 
 What Docker mounts into the hub container (read-write unless noted), all at the same path as on your machine:
 - `FOLDERS_ROOT` (default your home folder): only folders inside it can be attached. Set it narrower, such as `/home/me/repos`, to limit what the container can write. The canvas container gets the same mount, so an agent's file exports land where your drawings are. While `FOLDERS_ROOT` is empty or unreadable the hub exits and Docker restarts it (this waits out Docker Desktop connecting the mount after a reboot), so `FOLDERS_ROOT` must hold at least one entry; until then http://localhost:3080 refuses connections.
@@ -53,6 +53,7 @@ What Docker mounts into the hub container (read-write unless noted), all at the 
 ### Without Docker
 Needs Node.js 20 or newer (with npm), git and curl, on Linux or WSL.
 ```bash
+cp .env.example .env         # optional here: set ports or FOLDERS_ROOT (UID/GID are Docker-only)
 scripts/native.sh install    # once, and after canvas/ changes: npm ci + build of the canvas
 scripts/native.sh start      # canvas and hub in the background; logs and pids in .native/
 scripts/native.sh status     # or: stop, restart
@@ -108,7 +109,8 @@ You may edit it while the hub is stopped, for example to keep a personal setup i
 1. It uses the branch the checkout is on and refuses during a merge or rebase. On a branch listed in `HUB_AUTO_SYNC_BRANCHES` it goes ahead; on any other branch it first asks "Commit and push ... on branch ...?".
 2. It fetches the branch's upstream. If your checkout is strictly behind, it fast-forwards (`--ff-only`); it never rebases or rewrites your commits. If git refuses the fast-forward, sync goes on and says the checkout was not updated.
 3. It stages only `*.excalidraw` and `*.png` under the clicked folder and commits them as "`<folder> <names> diagram update`".
-4. It pushes. If you have other unpushed commits on the branch, only the drawings commit is pushed and those stay local (run `git pull --rebase` when you are ready). With no upstream branch it only commits locally and says so. A folder outside a git repo has no ⟳; the top node's tooltip says why.
+4. It pushes. If you have other unpushed commits on the branch, only the drawings commit is pushed and those stay local (run `git pull --rebase` when you are ready). With no upstream branch it only commits locally and says so. If the push fails (offline, remote refused), the commit stays local and the next ⟳ does not retry it: run `git push` in the checkout. A folder outside a git repo has no ⟳; the top node's tooltip says why.
+5. Under Docker the container sees only `FOLDERS_ROOT`, so an `origin` given as a local path (such as `/home/me/backup.git`) must lie inside it, otherwise the push fails with "does not appear to be a git repository".
 
 ## Agent MCP
 The agent's Excalidraw MCP server is `scripts/mcp.sh` in this clone. Register it once, using the clone's absolute path:
