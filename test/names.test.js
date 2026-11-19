@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { MAX_STEM, isSafeName, isUsableLabel, nextVersionOf, parseStem, plainTargetIn, saveName, saveStem, sortFamilies } from '../src/names.js';
 
 test('isSafeName accepts plain names and rejects traversal or odd characters', () => {
-  for (const ok of ['ai-map', 'f1-title-2026', 'budgeting_v1_plan', 'a.b']) assert.equal(isSafeName(ok), true, ok);
+  for (const ok of ['mindmap', 'board', 'roadmap_v1_plan', 'a.b']) assert.equal(isSafeName(ok), true, ok);
   for (const bad of ['', '.', '..', '../x', 'a/b', 'a\\b', '.hidden', 'a..b', 'x y', 'a\0', '-x', 'é', 'a'.repeat(200), null, 3]) assert.equal(isSafeName(bad), false, String(bad));
 });
 
 test('saveName builds a scheme name and slugs the label', () => {
-  assert.equal(saveName('budgeting', 2, ''), 'budgeting_v2.excalidraw');
-  assert.equal(saveName('budgeting', 2, '  New Idea / draft! '), 'budgeting_v2_new_idea_draft.excalidraw');
-  assert.equal(saveName('budgeting', 2, '!!!'), 'budgeting_v2.excalidraw');
+  assert.equal(saveName('roadmap', 2, ''), 'roadmap_v2.excalidraw');
+  assert.equal(saveName('roadmap', 2, '  New Idea / draft! '), 'roadmap_v2_new_idea_draft.excalidraw');
+  assert.equal(saveName('roadmap', 2, '!!!'), 'roadmap_v2.excalidraw');
 });
 
 test('huge version numbers are not versions; long names still fit', () => {

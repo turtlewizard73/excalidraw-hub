@@ -66,7 +66,7 @@ test('drag across roots: the drawing, its png and its Revert history move; Rever
   expect(fs.readdirSync(hist)).toHaveLength(1); // the overwrite above kept the old file
   // The highlight, with synthetic drag events (Playwright's real drag does not leave the pointer over a target to look at).
   const src = drawing(page, other, NOTE);
-  const target = folder(page, main, 'ai-map');
+  const target = folder(page, main, 'mindmap');
   const dt = await page.evaluateHandle(() => new DataTransfer());
   await src.dispatchEvent('dragstart', { dataTransfer: dt });
   await target.dispatchEvent('dragover', { dataTransfer: dt });
@@ -78,22 +78,22 @@ test('drag across roots: the drawing, its png and its Revert history move; Rever
   await src.dispatchEvent('dragend', { dataTransfer: dt });
   // The real drag and drop.
   await src.dragTo(target);
-  await expect(page.getByTestId('message')).toHaveText('Moved other-repo/notes/notes_v0.excalidraw to repo/ai-map/notes_v0.excalidraw');
-  await expect(folder(page, main, 'ai-map')).not.toHaveClass(/drop/);
-  expect(exists('ai-map/notes_v0.excalidraw')).toBe(true);
-  expect(exists('ai-map/notes_v0.png')).toBe(true);
+  await expect(page.getByTestId('message')).toHaveText('Moved other-repo/notes/notes_v0.excalidraw to repo/mindmap/notes_v0.excalidraw');
+  await expect(folder(page, main, 'mindmap')).not.toHaveClass(/drop/);
+  expect(exists('mindmap/notes_v0.excalidraw')).toBe(true);
+  expect(exists('mindmap/notes_v0.png')).toBe(true);
   expect(exists(NOTE, OTHER)).toBe(false);
   expect(exists('notes/notes_v0.png', OTHER)).toBe(false);
-  expect(fs.readdirSync(path.join(BACKUPS, main, 'ai-map', 'notes_v0'))).toHaveLength(1);
+  expect(fs.readdirSync(path.join(BACKUPS, main, 'mindmap', 'notes_v0'))).toHaveLength(1);
   expect(fs.existsSync(hist)).toBe(false);
-  await expect(page.getByTestId('current')).toHaveText('repo / ai-map / notes_v0.excalidraw');
-  await expect(drawing(page, main, 'ai-map/notes_v0.excalidraw')).toBeVisible();
+  await expect(page.getByTestId('current')).toHaveText('repo / mindmap / notes_v0.excalidraw');
+  await expect(drawing(page, main, 'mindmap/notes_v0.excalidraw')).toBeVisible();
 
   await expect(page.getByTestId('revert')).toBeEnabled();
   page.once('dialog', (d) => d.accept());
   await page.getByTestId('revert').click();
-  await expect(page.getByTestId('message')).toHaveText('Reverted repo/ai-map/notes_v0.excalidraw (0 earlier states left)');
-  expect(readDoc('ai-map/notes_v0.excalidraw').elements).toHaveLength(1); // the state before the rectangle
+  await expect(page.getByTestId('message')).toHaveText('Reverted repo/mindmap/notes_v0.excalidraw (0 earlier states left)');
+  expect(readDoc('mindmap/notes_v0.excalidraw').elements).toHaveLength(1); // the state before the rectangle
   await expect(page.getByTestId('revert')).toBeDisabled();
 });
 

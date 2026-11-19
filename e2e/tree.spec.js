@@ -49,8 +49,8 @@ test('collapse all closes every folder, roots included, and stays closed after a
 });
 
 test('new folder, and saves at depth 2 name the drawing after its folder', async () => {
-  await open(page, root, 'budgeting');
-  await loadDrawing(page, root, 'budgeting/budgeting_v0_plan.excalidraw');
+  await open(page, root, 'roadmap');
+  await loadDrawing(page, root, 'roadmap/roadmap_v0_plan.excalidraw');
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   await open(page, root, 'nested');
   page.once('dialog', (d) => d.accept('fresh'));

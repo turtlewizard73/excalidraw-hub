@@ -50,7 +50,7 @@ services:
       HUB_URL: http://hub:3180
       CANVAS_URL: http://canvas:3000
       DATA_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/repo/docs/drawings"
-      REPO_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/repo"
+      GIT_REPO_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/repo"
       BACKUPS_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/backups"
       REMOTE_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/remote.git"
       EXTRA_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/extra"

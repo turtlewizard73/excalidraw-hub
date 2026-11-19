@@ -46,7 +46,7 @@ const post = (route, body, headers = {}) => fetch(base + route, { method: 'POST'
 const get = async (route) => (await fetch(base + route)).json();
 const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${s.address().port}`)));
 const mkWorkspace = () => createWorkspace({ backupsDir, foldersRoot: home, file: path.join(home, 'hub.json'), log: () => {} });
-const BP = 'budgeting/budgeting_v0_plan.excalidraw'; // the seeded drawing, as a path inside the root
+const BP = 'roadmap/roadmap_v0_plan.excalidraw'; // the seeded drawing, as a path inside the root
 const at = (p) => ({ root: rid, path: p });
 const readDoc = async (rel) => JSON.parse(await fs.readFile(path.join(dir, rel), 'utf8'));
 const current = (p) => ({ root: rid, path: p });
@@ -55,9 +55,9 @@ beforeEach(async () => {
   home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-api-')));
   dir = path.join(home, 'drawings');
   backupsDir = path.join(home, 'backups');
-  for (const d of ['budgeting', 'agents', 'new-proj', 'elsewhere', 'tmpdir']) await fs.mkdir(path.join(dir, d), { recursive: true });
+  for (const d of ['roadmap', 'agents', 'new-proj', 'elsewhere', 'tmpdir']) await fs.mkdir(path.join(dir, d), { recursive: true });
   await fs.writeFile(path.join(dir, BP), JSON.stringify({ elements: [rect('a'), rect('b')], appState: { viewBackgroundColor: '#fff9db' } }));
-  await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'), 'png');
+  await fs.writeFile(path.join(dir, 'roadmap', 'roadmap_v0_plan.png'), 'png');
   canvas = fakeCanvas();
   canvasUrl = await listen(canvas.server);
   ws = await mkWorkspace();
@@ -77,9 +77,9 @@ test('tree → load → clean → edit → dirty → save new version → clean'
   assert.deepEqual(folders, [{ id: rid, name: 'drawings', path: dir, sync: false, syncError: folders[0].syncError }]);
   assert.match(folders[0].syncError, /not a git repository/);
   const top = await get(`/api/tree?root=${rid}`);
-  assert.deepEqual(top.dirs.map((d) => d.path), ['agents', 'budgeting', 'elsewhere', 'new-proj', 'tmpdir']);
-  const tree = await get(`/api/tree?root=${rid}&path=budgeting`);
-  assert.deepEqual(tree.drawings.map((d) => [d.file, d.path, d.latest, d.backups]), [['budgeting_v0_plan.excalidraw', BP, true, 0]]);
+  assert.deepEqual(top.dirs.map((d) => d.path), ['agents', 'elsewhere', 'new-proj', 'roadmap', 'tmpdir']);
+  const tree = await get(`/api/tree?root=${rid}&path=roadmap`);
+  assert.deepEqual(tree.drawings.map((d) => [d.file, d.path, d.latest, d.backups]), [['roadmap_v0_plan.excalidraw', BP, true, 0]]);
   assert.equal((await get('/api/status')).dirty, false, 'empty canvas, nothing loaded');
 
   const load = await post('/api/load', at(BP));
@@ -89,9 +89,9 @@ test('tree → load → clean → edit → dirty → save new version → clean'
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
 
-  const save = await (await post('/api/save', { root: rid, dir: 'budgeting', label: 'With C', versioned: true })).json();
-  assert.deepEqual(save.current, current('budgeting/budgeting_v1_with_c.excalidraw'));
-  const saved = await readDoc('budgeting/budgeting_v1_with_c.excalidraw');
+  const save = await (await post('/api/save', { root: rid, dir: 'roadmap', label: 'With C', versioned: true })).json();
+  assert.deepEqual(save.current, current('roadmap/roadmap_v1_with_c.excalidraw'));
+  const saved = await readDoc('roadmap/roadmap_v1_with_c.excalidraw');
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
   assert.equal('createdAt' in saved.elements[0], false, 'server keys stripped');
   assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' }, 'appState carried from the loaded file');
@@ -101,18 +101,18 @@ test('tree → load → clean → edit → dirty → save new version → clean'
 test('switching saves unsaved work into the loaded drawing first, backing up the old file', async () => {
   await post('/api/load', at(BP));
   const original = await fs.readFile(path.join(dir, BP));
-  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
+  await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
   canvas.state.elements.set('x', rect('x'));
-  const res = await post('/api/load', at('budgeting/other.excalidraw'));
+  const res = await post('/api/load', at('roadmap/other.excalidraw'));
   assert.equal(res.status, 200);
   assert.deepEqual((await res.json()).autosaved, current(BP));
   const saved = await readDoc(BP);
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'x']);
   assert.deepEqual([...canvas.state.elements.keys()], ['o'], 'then the other drawing is loaded');
-  const bdir = path.join(backupsDir, rid, 'budgeting', 'budgeting_v0_plan');
+  const bdir = path.join(backupsDir, rid, 'roadmap', 'roadmap_v0_plan');
   const [backup] = await fs.readdir(bdir);
   assert.deepEqual(await fs.readFile(path.join(bdir, backup)), original, 'the old file is kept byte for byte');
-  const listed = (await get(`/api/tree?root=${rid}&path=budgeting`)).drawings.find((d) => d.file === 'budgeting_v0_plan.excalidraw');
+  const listed = (await get(`/api/tree?root=${rid}&path=roadmap`)).drawings.find((d) => d.file === 'roadmap_v0_plan.excalidraw');
   assert.equal(listed.backups, 1);
 });
 
@@ -123,7 +123,7 @@ test('clicking the loaded drawing while dirty saves it and shows the saved state
   assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'x']);
   assert.equal((await get('/api/status')).dirty, false);
   canvas.state.elements.set('y', rect('y'));
-  assert.equal((await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).status, 200, 'the next Save is not refused as "changed on disk"');
+  assert.equal((await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).status, 200, 'the next Save is not refused as "changed on disk"');
 });
 
 test('switching with nothing loaded saves to tmp/ in the root of the drawing being opened; with an empty canvas there is nothing to save', async () => {
@@ -150,15 +150,15 @@ test('a refused save stops the switch and says why', async () => {
   canvas.state.elements.set('x', rect('x'));
   await new Promise((r) => setTimeout(r, 20));
   await fs.writeFile(path.join(dir, BP), JSON.stringify({ elements: [rect('git-pulled')] }));
-  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
-  const res = await post('/api/load', at('budgeting/other.excalidraw'));
+  await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  const res = await post('/api/load', at('roadmap/other.excalidraw'));
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.saveFailed, true);
   assert.match(body.error, /could not be saved, so other\.excalidraw was not loaded.*changed on disk.*Save new version/);
   assert.ok(canvas.state.elements.has('x'), 'canvas untouched');
   assert.deepEqual((await get('/api/status')).current, current(BP));
-  assert.equal((await post('/api/load', at('budgeting/missing.excalidraw'))).status, 404, 'a missing target saves nothing');
+  assert.equal((await post('/api/load', at('roadmap/missing.excalidraw'))).status, 404, 'a missing target saves nothing');
 });
 
 test('revert restores the newest backup step by step and keeps what it replaced', async () => {
@@ -166,10 +166,10 @@ test('revert restores the newest backup step by step and keeps what it replaced'
   await post('/api/load', at(BP));
   const v1 = await fs.readFile(file);
   canvas.state.elements.set('c', rect('c'));
-  await post('/api/save', { root: rid, dir: 'budgeting', versioned: false });
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
   const v2 = await fs.readFile(file);
   canvas.state.elements.set('d', rect('d'));
-  await post('/api/save', { root: rid, dir: 'budgeting', versioned: false });
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
   const v3 = await fs.readFile(file);
   const res = await (await post('/api/revert', at(BP))).json();
   assert.equal(res.remaining, 1);
@@ -181,7 +181,7 @@ test('revert restores the newest backup step by step and keeps what it replaced'
   assert.deepEqual(await fs.readFile(file), v1);
   const none = await post('/api/revert', at(BP));
   assert.equal(none.status, 404);
-  const kdir = path.join(backupsDir, rid, '_reverted', 'budgeting', 'budgeting_v0_plan');
+  const kdir = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan');
   const kept = await fs.readdir(kdir);
   const keptBytes = await Promise.all(kept.map((n) => fs.readFile(path.join(kdir, n))));
   assert.deepEqual(keptBytes.map(String).sort(), [v2, v3].map(String).sort(), 'every replaced state is kept');
@@ -191,7 +191,7 @@ test('revert with unsaved edits restores the last saved state and keeps the edit
   const file = path.join(dir, BP);
   await post('/api/load', at(BP));
   canvas.state.elements.set('c', rect('c'));
-  await post('/api/save', { root: rid, dir: 'budgeting', versioned: false });
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
   const lastSaved = await fs.readFile(file);
   canvas.state.elements.set('edit', rect('edit')); // unsaved
   const res = await post('/api/revert', at(BP));
@@ -199,20 +199,20 @@ test('revert with unsaved edits restores the last saved state and keeps the edit
   assert.equal((await res.json()).remaining, 1, 'the earlier backup is still there');
   assert.deepEqual(await fs.readFile(file), lastSaved);
   assert.deepEqual([...canvas.state.elements.keys()].sort(), ['a', 'b', 'c']);
-  const dirR = path.join(backupsDir, rid, '_reverted', 'budgeting', 'budgeting_v0_plan');
+  const dirR = path.join(backupsDir, rid, '_reverted', 'roadmap', 'roadmap_v0_plan');
   const [kept] = await fs.readdir(dirR);
   assert.ok(JSON.parse(await fs.readFile(path.join(dirR, kept), 'utf8')).elements.some((e) => e.id === 'edit'), 'the unsaved edit is kept');
-  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
-  assert.equal((await post('/api/revert', at('budgeting/other.excalidraw'))).status, 409, 'not the loaded drawing');
+  await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  assert.equal((await post('/api/revert', at('roadmap/other.excalidraw'))).status, 409, 'not the loaded drawing');
 });
 
 test('sync: off outside a repo with git\'s reason; passes the repo-relative folder and only known confirmations to git', async () => {
-  const off = await post('/api/sync', { root: rid, path: 'budgeting' });
+  const off = await post('/api/sync', { root: rid, path: 'roadmap' });
   assert.equal(off.status, 404);
   assert.match((await off.json()).error, /sync is off.*not a git repository/);
 
   const seen = [];
-  const fakeFolder = { id: 'f-fake', name: 'fake', path: path.join(dir, 'budgeting'), store: createStore(path.join(dir, 'budgeting')), repoDir: dir, sync: true,
+  const fakeFolder = { id: 'f-fake', name: 'fake', path: path.join(dir, 'roadmap'), store: createStore(path.join(dir, 'roadmap')), repoDir: dir, sync: true,
     git: { sync: async (d, o) => { seen.push([d, o.confirm, typeof o.serial]); return { committed: true, pushed: true, message: 'm' }; } } };
   const fakeWs = { canAttach: false, recent: () => [], folders: () => [fakeFolder], get: () => fakeFolder };
   const s = createServer({ workspace: fakeWs, canvas: createCanvas('http://127.0.0.1:1'), canvasPublicUrl: '' });
@@ -220,7 +220,7 @@ test('sync: off outside a repo with git\'s reason; passes the repo-relative fold
   const sync = (body) => fetch(`${url}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const r = await (await sync({ root: 'f-fake', path: '', confirm: ['ahead', 'evil', 'branch'] })).json();
   assert.equal(r.pushed, true);
-  assert.deepEqual(seen, [['budgeting', ['branch'], 'function']], 'folder relative to the repo top, not to the root');
+  assert.deepEqual(seen, [['roadmap', ['branch'], 'function']], 'folder relative to the repo top, not to the root');
   assert.equal((await sync({ root: 'f-fake', path: '../x' })).status, 400);
   assert.deepEqual(await (await fetch(`${url}/api/config`)).json(), { canvasUrl: '', canAttach: false, recent: [] });
   s.close();
@@ -235,24 +235,24 @@ test('sync with real git: a root inside a repo commits its drawings; the folder 
   assert.equal(ws2.folders()[0].sync, true);
   const s = createServer({ workspace: ws2, canvas: createCanvas('http://127.0.0.1:1'), canvasPublicUrl: '' });
   const url = await listen(s);
-  const res = await (await fetch(`${url}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: id2, path: 'budgeting' }) })).json();
+  const res = await (await fetch(`${url}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: id2, path: 'roadmap' }) })).json();
   assert.deepEqual([res.committed, res.pushed, res.noUpstream], [true, false, true]);
-  assert.match(execFileSync('git', ['-C', home, 'show', '--name-only', '--format=', 'HEAD']).toString(), /^drawings\/budgeting\/budgeting_v0_plan\.excalidraw$/m);
+  assert.match(execFileSync('git', ['-C', home, 'show', '--name-only', '--format=', 'HEAD']).toString(), /^drawings\/roadmap\/roadmap_v0_plan\.excalidraw$/m);
   s.close();
 });
 
 test('backups follow a rename; delete and a new file of the same name do not inherit them', async () => {
   await post('/api/load', at(BP));
   canvas.state.elements.set('c', rect('c'));
-  await post('/api/save', { root: rid, dir: 'budgeting', versioned: false });
-  await post('/api/rename', { ...at(BP), newBase: 'budgeting_v0_moved' });
-  const drawings = async () => (await get(`/api/tree?root=${rid}&path=budgeting`)).drawings;
-  assert.equal((await drawings()).find((d) => d.file === 'budgeting_v0_moved.excalidraw').backups, 1);
-  await post('/api/delete', at('budgeting/budgeting_v0_moved.excalidraw'));
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
+  await post('/api/rename', { ...at(BP), newBase: 'roadmap_v0_moved' });
+  const drawings = async () => (await get(`/api/tree?root=${rid}&path=roadmap`)).drawings;
+  assert.equal((await drawings()).find((d) => d.file === 'roadmap_v0_moved.excalidraw').backups, 1);
+  await post('/api/delete', at('roadmap/roadmap_v0_moved.excalidraw'));
   canvas.state.elements.set('n', rect('n')); // nothing is loaded any more: the stem is the folder's
-  assert.equal((await post('/api/save', { root: rid, dir: 'budgeting', label: 'v0 moved', versioned: false })).status, 200);
-  assert.equal((await drawings()).find((d) => d.file === 'budgeting_v0_moved.excalidraw').backups, 0);
-  assert.equal((await fs.readdir(path.join(backupsDir, rid, '_retired', 'budgeting'))).length, 1);
+  assert.equal((await post('/api/save', { root: rid, dir: 'roadmap', label: 'v0 moved', versioned: false })).status, 200);
+  assert.equal((await drawings()).find((d) => d.file === 'roadmap_v0_moved.excalidraw').backups, 0);
+  assert.equal((await fs.readdir(path.join(backupsDir, rid, '_retired', 'roadmap'))).length, 1);
 });
 
 test('save expands agent shorthand with no tab, writes it back, and the canvas is clean right after', async () => {
@@ -296,8 +296,8 @@ test('a write landing during the save is not wiped: the file is saved, the canva
 
 test('a refused save leaves the canvas as it was', async () => {
   canvas.state.elements.set('s', { id: 's', type: 'rectangle', x: 0, y: 0, width: 100, height: 40, label: { text: 'hi' } });
-  const res = await post('/api/save', { root: rid, dir: 'budgeting', label: 'v0 plan', versioned: false });
-  assert.equal(res.status, 409, 'budgeting_v0_plan.excalidraw exists');
+  const res = await post('/api/save', { root: rid, dir: 'roadmap', label: 'v0 plan', versioned: false });
+  assert.equal(res.status, 409, 'roadmap_v0_plan.excalidraw exists');
   assert.ok('label' in canvas.state.elements.get('s'), 'not rewritten');
   assert.equal(canvas.state.elements.has('s-label'), false);
 });
@@ -313,27 +313,27 @@ test('save keeps files referenced only', async () => {
 test('png: an overwrite regenerates it; a render failure still saves the drawing', async () => {
   await post('/api/load', at(BP));
   canvas.state.elements.set('c', rect('c', 50));
-  assert.equal((await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).json()).png, true);
-  assert.equal(await fs.readFile(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'), 'utf8'), 'PNG of 3', 'stale png replaced');
+  assert.equal((await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json()).png, true);
+  assert.equal(await fs.readFile(path.join(dir, 'roadmap', 'roadmap_v0_plan.png'), 'utf8'), 'PNG of 3', 'stale png replaced');
   canvas.state.failExport = true;
   canvas.state.elements.set('d', rect('d', 80));
-  const res = await post('/api/save', { root: rid, dir: 'budgeting', versioned: true });
+  const res = await post('/api/save', { root: rid, dir: 'roadmap', versioned: true });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.png, false);
   assert.match(body.pngError, /render failed/);
-  assert.ok((await fs.readdir(path.join(dir, 'budgeting'))).includes('budgeting_v1.excalidraw'));
-  assert.equal((await fs.readdir(path.join(dir, 'budgeting'))).filter((f) => f.startsWith('.')).length, 0, 'no temp files left');
+  assert.ok((await fs.readdir(path.join(dir, 'roadmap'))).includes('roadmap_v1.excalidraw'));
+  assert.equal((await fs.readdir(path.join(dir, 'roadmap'))).filter((f) => f.startsWith('.')).length, 0, 'no temp files left');
 });
 
 test('rename and delete follow the current drawing and its png', async () => {
   await post('/api/load', at(BP));
-  const r = await (await post('/api/rename', { ...at(BP), newBase: 'budgeting_v0_first' })).json();
-  assert.deepEqual(r.current, current('budgeting/budgeting_v0_first.excalidraw'));
-  assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_first.excalidraw', 'budgeting_v0_first.png']);
-  const d = await (await post('/api/delete', at('budgeting/budgeting_v0_first.excalidraw'))).json();
+  const r = await (await post('/api/rename', { ...at(BP), newBase: 'roadmap_v0_first' })).json();
+  assert.deepEqual(r.current, current('roadmap/roadmap_v0_first.excalidraw'));
+  assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_first.excalidraw', 'roadmap_v0_first.png']);
+  const d = await (await post('/api/delete', at('roadmap/roadmap_v0_first.excalidraw'))).json();
   assert.equal(d.current, null);
-  assert.deepEqual(await fs.readdir(path.join(dir, 'budgeting')), []);
+  assert.deepEqual(await fs.readdir(path.join(dir, 'roadmap')), []);
 });
 
 test('guards: content type, origin, host, bad paths, unknown routes and roots', async () => {
@@ -342,7 +342,7 @@ test('guards: content type, origin, host, bad paths, unknown routes and roots', 
   assert.equal((await post('/api/delete', JSON.parse(body), { origin: 'http://evil.example' })).status, 403);
   assert.equal((await post('/api/rename', { ...at(BP), newBase: '../x' })).status, 400);
   assert.equal((await post('/api/delete', at('../x.excalidraw'))).status, 400);
-  assert.equal((await post('/api/delete', at('budgeting/../../x.excalidraw'))).status, 400);
+  assert.equal((await post('/api/delete', at('roadmap/../../x.excalidraw'))).status, 400);
   assert.equal((await post('/api/load', at('/etc/passwd'))).status, 400);
   assert.equal((await post('/api/save', { root: rid, dir: '../etc', versioned: false })).status, 400);
   assert.equal((await post('/api/save', { root: rid, dir: 'missing', versioned: false })).status, 404);
@@ -387,23 +387,23 @@ test('deleting the loaded drawing makes the canvas count as unsaved', async () =
   const s = await get('/api/status');
   assert.equal(s.current, null);
   assert.equal(s.dirty, true);
-  await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [] }));
-  const res = await post('/api/load', at('budgeting/other.excalidraw'));
+  await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [] }));
+  const res = await post('/api/load', at('roadmap/other.excalidraw'));
   assert.equal(res.status, 200);
   assert.deepEqual((await res.json()).autosaved, current('tmp/tmp_v0.excalidraw'), 'nothing loaded any more: the work went to tmp/');
 });
 
 test('same-origin posts pass, oversized bodies are refused', async () => {
-  const res = await post('/api/save', { root: rid, dir: 'budgeting', versioned: false }, { origin: base });
+  const res = await post('/api/save', { root: rid, dir: 'roadmap', versioned: false }, { origin: base });
   assert.equal(res.status, 200);
-  const big = await post('/api/save', { root: rid, dir: 'budgeting', label: 'x'.repeat(70000), versioned: false });
+  const big = await post('/api/save', { root: rid, dir: 'roadmap', label: 'x'.repeat(70000), versioned: false });
   assert.equal(big.status, 413);
 });
 
 test('concurrent saves get distinct versions', async () => {
   canvas.state.elements.set('a', rect('a'));
-  const results = await Promise.all([1, 2, 3].map(() => post('/api/save', { root: rid, dir: 'budgeting', versioned: true }).then((r) => r.json())));
-  assert.deepEqual(results.map((r) => r.current.path).sort(), ['budgeting_v1', 'budgeting_v2', 'budgeting_v3'].map((n) => `budgeting/${n}.excalidraw`));
+  const results = await Promise.all([1, 2, 3].map(() => post('/api/save', { root: rid, dir: 'roadmap', versioned: true }).then((r) => r.json())));
+  assert.deepEqual(results.map((r) => r.current.path).sort(), ['roadmap_v1', 'roadmap_v2', 'roadmap_v3'].map((n) => `roadmap/${n}.excalidraw`));
 });
 
 test('after a browser sync the strict anchor is used through the API', async () => {
@@ -441,8 +441,8 @@ test('a folder or drawing whose name cannot make a safe file name is refused wit
 });
 
 test('version overflow is a clear 400, not a retry loop', async () => {
-  await fs.writeFile(path.join(dir, 'budgeting', 'budgeting_v999999999.excalidraw'), JSON.stringify({ elements: [] }));
-  const res = await post('/api/save', { root: rid, dir: 'budgeting', versioned: true });
+  await fs.writeFile(path.join(dir, 'roadmap', 'roadmap_v999999999.excalidraw'), JSON.stringify({ elements: [] }));
+  const res = await post('/api/save', { root: rid, dir: 'roadmap', versioned: true });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /highest version/);
 });
@@ -450,7 +450,7 @@ test('version overflow is a clear 400, not a retry loop', async () => {
 test('deleting the loaded drawing keeps its appState for the next save', async () => {
   await post('/api/load', at(BP));
   await post('/api/delete', at(BP));
-  const save = await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).json();
+  const save = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json();
   assert.deepEqual((await readDoc(save.current.path)).appState, { viewBackgroundColor: '#fff9db' });
 });
 
@@ -458,29 +458,29 @@ test('versioning off: save overwrites the loaded drawing and becomes clean', asy
   await post('/api/load', at(BP));
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
-  const save = await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).json();
+  const save = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json();
   assert.deepEqual(save.current, current(BP));
   const saved = await readDoc(BP);
   assert.deepEqual(saved.elements.map((e) => e.id).sort(), ['a', 'b', 'c']);
   assert.deepEqual(saved.appState, { viewBackgroundColor: '#fff9db' });
   assert.equal((await get('/api/status')).dirty, false);
-  assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png'], 'no new file');
+  assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png'], 'no new file');
 });
 
 test('versioning off: a label or nothing loaded writes a plain name and never overwrites another file', async () => {
   const before = await fs.readFile(path.join(dir, BP), 'utf8');
   canvas.state.elements.set('a', rect('a'));
-  const first = await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).json();
-  assert.equal(first.current.path, 'budgeting/budgeting.excalidraw', 'nothing loaded');
+  const first = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json();
+  assert.equal(first.current.path, 'roadmap/roadmap.excalidraw', 'nothing loaded');
 
-  const refused = await post('/api/save', { root: rid, dir: 'budgeting', label: 'v0 plan', versioned: false });
+  const refused = await post('/api/save', { root: rid, dir: 'roadmap', label: 'v0 plan', versioned: false });
   assert.equal(refused.status, 409, 'the label names a file that is not the loaded drawing');
-  assert.match((await refused.json()).error, /budgeting_v0_plan\.excalidraw already exists.*Save new version/);
+  assert.match((await refused.json()).error, /roadmap_v0_plan\.excalidraw already exists.*Save new version/);
   assert.equal(await fs.readFile(path.join(dir, BP), 'utf8'), before, 'other drawing untouched');
-  assert.equal((await get('/api/status')).current.path, 'budgeting/budgeting.excalidraw', 'current unchanged after refusal');
+  assert.equal((await get('/api/status')).current.path, 'roadmap/roadmap.excalidraw', 'current unchanged after refusal');
 
-  const labelled = await (await post('/api/save', { root: rid, dir: 'budgeting', label: 'Second Idea', versioned: false })).json();
-  assert.equal(labelled.current.path, 'budgeting/budgeting_second_idea.excalidraw');
+  const labelled = await (await post('/api/save', { root: rid, dir: 'roadmap', label: 'Second Idea', versioned: false })).json();
+  assert.equal(labelled.current.path, 'roadmap/roadmap_second_idea.excalidraw');
   assert.equal(await fs.readFile(path.join(dir, BP), 'utf8'), before);
 });
 
@@ -488,29 +488,29 @@ test('a save without the flag (a tab from before the checkbox) writes nothing an
   await post('/api/load', at(BP));
   const before = await fs.readFile(path.join(dir, BP), 'utf8');
   canvas.state.elements.set('c', rect('c', 50));
-  for (const body of [{ root: rid, dir: 'budgeting', label: '' }, { root: rid, dir: 'budgeting', versioned: 'yes' }]) {
+  for (const body of [{ root: rid, dir: 'roadmap', label: '' }, { root: rid, dir: 'roadmap', versioned: 'yes' }]) {
     const res = await post('/api/save', body);
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /reload/);
   }
   assert.equal(await fs.readFile(path.join(dir, BP), 'utf8'), before);
-  assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png']);
+  assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png']);
 });
 
 test('families: a folder with several stems versions each by its own stem; a loaded drawing\'s stem is used in its folder, the folder name elsewhere', async () => {
-  for (const f of ['notes_v0.excalidraw', 'notes_v3_x.excalidraw']) await fs.writeFile(path.join(dir, 'budgeting', f), JSON.stringify({ elements: [rect('n')] }));
-  await post('/api/load', at('budgeting/notes_v3_x.excalidraw'));
+  for (const f of ['notes_v0.excalidraw', 'notes_v3_x.excalidraw']) await fs.writeFile(path.join(dir, 'roadmap', f), JSON.stringify({ elements: [rect('n')] }));
+  await post('/api/load', at('roadmap/notes_v3_x.excalidraw'));
   canvas.state.elements.set('c', rect('c', 50));
-  const v = await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: true })).json();
-  assert.equal(v.current.path, 'budgeting/notes_v4.excalidraw', 'the loaded drawing\'s family, next version');
+  const v = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: true })).json();
+  assert.equal(v.current.path, 'roadmap/notes_v4.excalidraw', 'the loaded drawing\'s family, next version');
   const other = await (await post('/api/save', { root: rid, dir: 'elsewhere', versioned: true })).json();
   assert.equal(other.current.path, 'elsewhere/elsewhere_v0.excalidraw', 'another folder: that folder\'s name');
   await post('/api/load', at(BP));
   canvas.state.elements.set('d', rect('d', 70));
-  const plain = await (await post('/api/save', { root: rid, dir: 'budgeting', label: 'copy', versioned: false })).json();
-  assert.equal(plain.current.path, 'budgeting/budgeting_copy.excalidraw');
-  const latest = (await get(`/api/tree?root=${rid}&path=budgeting`)).drawings.filter((d) => d.latest).map((d) => d.file).sort();
-  assert.deepEqual(latest, ['budgeting_v0_plan.excalidraw', 'notes_v4.excalidraw']);
+  const plain = await (await post('/api/save', { root: rid, dir: 'roadmap', label: 'copy', versioned: false })).json();
+  assert.equal(plain.current.path, 'roadmap/roadmap_copy.excalidraw');
+  const latest = (await get(`/api/tree?root=${rid}&path=roadmap`)).drawings.filter((d) => d.latest).map((d) => d.file).sort();
+  assert.deepEqual(latest, ['notes_v4.excalidraw', 'roadmap_v0_plan.excalidraw']);
 });
 
 test('save at the root level and at depth 3 uses the folder\'s name as the stem', async () => {
@@ -525,9 +525,9 @@ test('save at the root level and at depth 3 uses the folder\'s name as the stem'
 });
 
 describe('guards on overwriting the loaded drawing', () => {
-  const file = 'budgeting_v0_plan.excalidraw';
+  const file = 'roadmap_v0_plan.excalidraw';
   const p = () => path.join(dir, BP);
-  const saveInPlace = () => post('/api/save', { root: rid, dir: 'budgeting', versioned: false });
+  const saveInPlace = () => post('/api/save', { root: rid, dir: 'roadmap', versioned: false });
   beforeEach(async () => { await post('/api/load', at(BP)); });
 
   async function refused(pattern) {
@@ -542,7 +542,7 @@ describe('guards on overwriting the loaded drawing', () => {
   test('a canvas that restarted empty does not wipe the file; versioned still saves', async () => {
     canvas.state.elements.clear();
     await refused(/canvas is empty/);
-    assert.equal((await post('/api/save', { root: rid, dir: 'budgeting', versioned: true })).status, 200);
+    assert.equal((await post('/api/save', { root: rid, dir: 'roadmap', versioned: true })).status, 200);
   });
 
   test('a canvas that lost an image does not overwrite', async () => {
@@ -560,32 +560,32 @@ describe('guards on overwriting the loaded drawing', () => {
     assert.equal((await saveInPlace()).status, 200);
     canvas.state.elements.set('d', rect('d', 60));
     assert.equal((await saveInPlace()).status, 200);
-    await post('/api/rename', { ...at(BP), newBase: 'budgeting_v0_first' });
+    await post('/api/rename', { ...at(BP), newBase: 'roadmap_v0_first' });
     canvas.state.elements.set('e', rect('e', 70));
     const save = await (await saveInPlace()).json();
-    assert.equal(save.current.path, 'budgeting/budgeting_v0_first.excalidraw');
+    assert.equal(save.current.path, 'roadmap/roadmap_v0_first.excalidraw');
     assert.deepEqual((await readDoc(save.current.path)).elements.map((e) => e.id).sort(), ['a', 'b', 'c', 'd', 'e']);
-    assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_first.excalidraw', 'budgeting_v0_first.png']);
+    assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_first.excalidraw', 'roadmap_v0_first.png']);
     void file;
   });
 
   test('after a failed load, save cannot overwrite the previous drawing', async () => {
-    await fs.writeFile(path.join(dir, 'budgeting', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
+    await fs.writeFile(path.join(dir, 'roadmap', 'other.excalidraw'), JSON.stringify({ elements: [rect('o')] }));
     const before = await fs.readFile(p(), 'utf8');
     canvas.state.failBatch = true;
-    assert.equal((await post('/api/load', at('budgeting/other.excalidraw'))).status, 502);
+    assert.equal((await post('/api/load', at('roadmap/other.excalidraw'))).status, 502);
     canvas.state.failBatch = false;
     const s = await get('/api/status');
     assert.equal(s.current, null);
     assert.equal(s.dirty, true);
     const save = await (await saveInPlace()).json();
-    assert.equal(save.current.path, 'budgeting/budgeting.excalidraw');
+    assert.equal(save.current.path, 'roadmap/roadmap.excalidraw');
     assert.equal(await fs.readFile(p(), 'utf8'), before);
   });
 
   test('a label with nothing usable is refused, not treated as no label', async () => {
     const before = await fs.readFile(p(), 'utf8');
-    const res = await post('/api/save', { root: rid, dir: 'budgeting', label: '日本語', versioned: false });
+    const res = await post('/api/save', { root: rid, dir: 'roadmap', label: '日本語', versioned: false });
     assert.equal(res.status, 400);
     assert.equal(await fs.readFile(p(), 'utf8'), before);
   });
@@ -602,40 +602,40 @@ describe('folders, mkdir and move', () => {
   let other, otherId;
   beforeEach(async () => {
     other = path.join(home, 'repo-b', 'docs', 'drawings');
-    await fs.mkdir(path.join(other, 'budgeting'), { recursive: true });
-    await fs.writeFile(path.join(other, 'budgeting', 'budgeting_v0.excalidraw'), JSON.stringify({ elements: [rect('other')] }));
+    await fs.mkdir(path.join(other, 'roadmap'), { recursive: true });
+    await fs.writeFile(path.join(other, 'roadmap', 'roadmap_v0.excalidraw'), JSON.stringify({ elements: [rect('other')] }));
     otherId = (await (await post('/api/folders/attach', { path: other })).json()).folder.id;
   });
 
   test('attach lists the folder (and a recent entry after detach); load and save there use its own files and backups', async () => {
     assert.deepEqual((await get('/api/folders')).map((f) => f.id), [rid, otherId]);
     assert.deepEqual(await get('/api/config'), { canvasUrl: 'http://localhost:3000', canAttach: true, recent: [] });
-    const OP = 'budgeting/budgeting_v0.excalidraw';
+    const OP = 'roadmap/roadmap_v0.excalidraw';
     const load = await (await post('/api/load', { root: otherId, path: OP })).json();
     assert.deepEqual(load.current, { root: otherId, path: OP });
     canvas.state.elements.set('z', rect('z'));
-    const save = await (await post('/api/save', { root: otherId, dir: 'budgeting', versioned: false })).json();
+    const save = await (await post('/api/save', { root: otherId, dir: 'roadmap', versioned: false })).json();
     assert.deepEqual(save.current, { root: otherId, path: OP }, 'overwrites the loaded drawing in its root');
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(other, OP), 'utf8')).elements.map((e) => e.id).sort(), ['other', 'z']);
-    assert.equal((await fs.readdir(path.join(backupsDir, otherId, 'budgeting', 'budgeting_v0'))).length, 1);
-    assert.deepEqual((await fs.readdir(path.join(dir, 'budgeting'))).sort(), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png'], 'the first root is untouched');
+    assert.equal((await fs.readdir(path.join(backupsDir, otherId, 'roadmap', 'roadmap_v0'))).length, 1);
+    assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), ['roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png'], 'the first root is untouched');
     canvas.state.elements.set('w', rect('w'));
-    const cross = await (await post('/api/save', { root: rid, dir: 'budgeting', versioned: false })).json();
-    assert.deepEqual(cross.current, current('budgeting/budgeting.excalidraw'), 'same folder name in another root: its own file');
-    const sync = await post('/api/sync', { root: otherId, path: 'budgeting' });
+    const cross = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false })).json();
+    assert.deepEqual(cross.current, current('roadmap/roadmap.excalidraw'), 'same folder name in another root: its own file');
+    const sync = await post('/api/sync', { root: otherId, path: 'roadmap' });
     assert.equal(sync.status, 404);
   });
 
   test('detach: refused for the loaded drawing\'s root, then removes it, fills recent and the state file; unknown root is 404', async () => {
-    await post('/api/load', { root: otherId, path: 'budgeting/budgeting_v0.excalidraw' });
+    await post('/api/load', { root: otherId, path: 'roadmap/roadmap_v0.excalidraw' });
     assert.equal((await post('/api/folders/detach', { id: otherId })).status, 409);
     await post('/api/load', at(BP));
     const done = await (await post('/api/folders/detach', { id: otherId })).json();
     assert.deepEqual(done, { detached: { id: otherId, path: other }, recent: [other] });
     assert.deepEqual((await get('/api/config')).recent, [other]);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(home, 'hub.json'), 'utf8')), { version: 2, folders: [{ path: dir }], recent: [other] });
-    assert.ok(await fs.stat(path.join(other, 'budgeting', 'budgeting_v0.excalidraw')), 'files stay on disk');
-    assert.equal((await post('/api/load', { root: otherId, path: 'budgeting/budgeting_v0.excalidraw' })).status, 404);
+    assert.ok(await fs.stat(path.join(other, 'roadmap', 'roadmap_v0.excalidraw')), 'files stay on disk');
+    assert.equal((await post('/api/load', { root: otherId, path: 'roadmap/roadmap_v0.excalidraw' })).status, 404);
     assert.equal((await post('/api/folders/attach', { path: '/etc' })).status, 403);
   });
 
@@ -649,10 +649,10 @@ describe('folders, mkdir and move', () => {
   });
 
   test('mkdir creates a folder inside a root; unsafe names, duplicates and missing parents are refused', async () => {
-    assert.deepEqual(await (await post('/api/mkdir', { root: rid, path: 'budgeting/new' })).json(), { root: rid, path: 'budgeting/new' });
-    assert.deepEqual((await get(`/api/tree?root=${rid}&path=budgeting`)).dirs, [{ name: 'new', path: 'budgeting/new' }]);
-    assert.equal((await post('/api/mkdir', { root: rid, path: 'budgeting/new' })).status, 409);
-    assert.equal((await post('/api/mkdir', { root: rid, path: 'budgeting/bad name' })).status, 400);
+    assert.deepEqual(await (await post('/api/mkdir', { root: rid, path: 'roadmap/new' })).json(), { root: rid, path: 'roadmap/new' });
+    assert.deepEqual((await get(`/api/tree?root=${rid}&path=roadmap`)).dirs, [{ name: 'new', path: 'roadmap/new' }]);
+    assert.equal((await post('/api/mkdir', { root: rid, path: 'roadmap/new' })).status, 409);
+    assert.equal((await post('/api/mkdir', { root: rid, path: 'roadmap/bad name' })).status, 400);
     assert.equal((await post('/api/mkdir', { root: rid, path: '../up' })).status, 400);
     assert.equal((await post('/api/mkdir', { root: rid, path: 'nope/sub' })).status, 404);
   });
@@ -660,38 +660,38 @@ describe('folders, mkdir and move', () => {
   test('move: into a folder of the same root and across roots, with the png, the backups and the loaded drawing following', async () => {
     await post('/api/load', at(BP));
     canvas.state.elements.set('c', rect('c'));
-    await post('/api/save', { root: rid, dir: 'budgeting', versioned: false }); // a backup exists
+    await post('/api/save', { root: rid, dir: 'roadmap', versioned: false }); // a backup exists
     const inRoot = await (await post('/api/move', { from: at(BP), to: { root: rid, dir: 'elsewhere' } })).json();
-    assert.deepEqual(inRoot, { moved: true, root: rid, path: 'elsewhere/budgeting_v0_plan.excalidraw', current: current('elsewhere/budgeting_v0_plan.excalidraw') });
-    assert.deepEqual((await fs.readdir(path.join(dir, 'elsewhere'))).sort(), ['budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png']);
-    assert.deepEqual(await fs.readdir(path.join(dir, 'budgeting')), []);
+    assert.deepEqual(inRoot, { moved: true, root: rid, path: 'elsewhere/roadmap_v0_plan.excalidraw', current: current('elsewhere/roadmap_v0_plan.excalidraw') });
+    assert.deepEqual((await fs.readdir(path.join(dir, 'elsewhere'))).sort(), ['roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png']);
+    assert.deepEqual(await fs.readdir(path.join(dir, 'roadmap')), []);
     assert.equal((await get('/api/status')).dirty, false);
 
-    const across = await (await post('/api/move', { from: current('elsewhere/budgeting_v0_plan.excalidraw'), to: { root: otherId, dir: 'budgeting' } })).json();
-    assert.deepEqual(across.current, { root: otherId, path: 'budgeting/budgeting_v0_plan.excalidraw' });
-    assert.deepEqual((await fs.readdir(path.join(other, 'budgeting'))).sort(), ['budgeting_v0.excalidraw', 'budgeting_v0_plan.excalidraw', 'budgeting_v0_plan.png']);
-    const tree = await get(`/api/tree?root=${otherId}&path=budgeting`);
-    assert.equal(tree.drawings.find((d) => d.file === 'budgeting_v0_plan.excalidraw').backups, 1, 'Revert history followed');
+    const across = await (await post('/api/move', { from: current('elsewhere/roadmap_v0_plan.excalidraw'), to: { root: otherId, dir: 'roadmap' } })).json();
+    assert.deepEqual(across.current, { root: otherId, path: 'roadmap/roadmap_v0_plan.excalidraw' });
+    assert.deepEqual((await fs.readdir(path.join(other, 'roadmap'))).sort(), ['roadmap_v0.excalidraw', 'roadmap_v0_plan.excalidraw', 'roadmap_v0_plan.png']);
+    const tree = await get(`/api/tree?root=${otherId}&path=roadmap`);
+    assert.equal(tree.drawings.find((d) => d.file === 'roadmap_v0_plan.excalidraw').backups, 1, 'Revert history followed');
     canvas.state.elements.set('d', rect('d'));
-    assert.equal((await post('/api/save', { root: otherId, dir: 'budgeting', versioned: false })).status, 200, 'the loaded drawing is still saveable after the move');
-    const rev = await post('/api/revert', { root: otherId, path: 'budgeting/budgeting_v0_plan.excalidraw' });
+    assert.equal((await post('/api/save', { root: otherId, dir: 'roadmap', versioned: false })).status, 200, 'the loaded drawing is still saveable after the move');
+    const rev = await post('/api/revert', { root: otherId, path: 'roadmap/roadmap_v0_plan.excalidraw' });
     assert.equal(rev.status, 200);
   });
 
   test('move refuses a clash (409, also on the png), a missing target or root, and a drop on its own folder does nothing', async () => {
-    await fs.writeFile(path.join(dir, 'elsewhere', 'budgeting_v0_plan.png'), 'orphan');
+    await fs.writeFile(path.join(dir, 'elsewhere', 'roadmap_v0_plan.png'), 'orphan');
     assert.equal((await post('/api/move', { from: at(BP), to: { root: rid, dir: 'elsewhere' } })).status, 409);
-    await fs.rm(path.join(dir, 'elsewhere', 'budgeting_v0_plan.png'));
-    await fs.writeFile(path.join(dir, 'elsewhere', 'budgeting_v0_plan.excalidraw'), '{"elements":[]}');
+    await fs.rm(path.join(dir, 'elsewhere', 'roadmap_v0_plan.png'));
+    await fs.writeFile(path.join(dir, 'elsewhere', 'roadmap_v0_plan.excalidraw'), '{"elements":[]}');
     assert.equal((await post('/api/move', { from: at(BP), to: { root: rid, dir: 'elsewhere' } })).status, 409);
     assert.equal((await post('/api/move', { from: at(BP), to: { root: rid, dir: 'nope' } })).status, 404);
     assert.equal((await post('/api/move', { from: at(BP), to: { root: 'f-nope', dir: '' } })).status, 404);
     assert.equal((await post('/api/move', { from: at(BP), to: { root: rid, dir: '../x' } })).status, 400);
     assert.equal((await post('/api/move', { from: at('../x.excalidraw'), to: { root: rid, dir: 'elsewhere' } })).status, 400);
     assert.equal((await post('/api/move', { from: at(BP) })).status, 400);
-    const noop = await (await post('/api/move', { from: at(BP), to: { root: rid, dir: 'budgeting' } })).json();
+    const noop = await (await post('/api/move', { from: at(BP), to: { root: rid, dir: 'roadmap' } })).json();
     assert.equal(noop.moved, false);
     await fs.access(path.join(dir, BP));
-    await fs.access(path.join(dir, 'budgeting', 'budgeting_v0_plan.png'));
+    await fs.access(path.join(dir, 'roadmap', 'roadmap_v0_plan.png'));
   });
 });

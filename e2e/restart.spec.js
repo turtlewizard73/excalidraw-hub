@@ -19,10 +19,10 @@ test('@restart attached folders survive a hub restart', async ({ browser }) => {
   await expect(folder(page, other)).toContainText('other-repo');
   await open(page, other, 'notes');
   const main = await rootId();
-  await open(page, main, 'budgeting');
-  await loadDrawing(page, main, 'budgeting/budgeting_v0_plan.excalidraw');
-  await expect(page.getByTestId('current')).toHaveText('repo / budgeting / budgeting_v0_plan.excalidraw');
+  await open(page, main, 'roadmap');
+  await loadDrawing(page, main, 'roadmap/roadmap_v0_plan.excalidraw');
+  await expect(page.getByTestId('current')).toHaveText('repo / roadmap / roadmap_v0_plan.excalidraw');
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
-  await expect(drawing(page, main, 'budgeting/budgeting_v0_plan.excalidraw')).toBeVisible();
+  await expect(drawing(page, main, 'roadmap/roadmap_v0_plan.excalidraw')).toBeVisible();
   await page.close();
 });

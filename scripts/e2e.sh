@@ -31,7 +31,7 @@ git init -q -b dev "$repo"
 g add -A && g commit -qm fixtures
 g remote add origin "$remote" && g push -q -u origin dev
 mkdir -p test-results
-e2e_env=(DATA_DIR="$drawings" REPO_DIR="$repo" BACKUPS_DIR="$backups" REMOTE_DIR="$remote" EXTRA_DIR="$extra" STATE_FILE="$state")
+e2e_env=(DATA_DIR="$drawings" GIT_REPO_DIR="$repo" BACKUPS_DIR="$backups" REMOTE_DIR="$remote" EXTRA_DIR="$extra" STATE_FILE="$state")
 
 wait_ready() {
   for _ in $(seq 60); do curl -sf http://127.0.0.1:3180/api/status >/dev/null && curl -sf http://127.0.0.1:3100/health >/dev/null && return 0; sleep 1; done

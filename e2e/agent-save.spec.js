@@ -8,7 +8,7 @@ const CANVAS = process.env.CANVAS_URL;
 const json = (r) => r.json();
 const canvasGet = (p) => fetch(CANVAS + p).then(json);
 const status = () => fetch(`${process.env.HUB_URL}/api/status`).then(json);
-const FILE = 'ai-map/ai-map_v1_agent.excalidraw';
+const FILE = 'mindmap/mindmap_v1_agent.excalidraw';
 
 test('agent save with no tab: expands shorthand, writes PNG, stays clean when a tab opens later', async ({ browser }) => {
   expect((await canvasGet('/api/sync/status')).websocketClients).toBe(0);
@@ -26,7 +26,7 @@ test('agent save with no tab: expands shorthand, writes PNG, stays clean when a 
   expect((await status()).agentElements).toBe(4);
 
   const root = await rootId();
-  const res = await hubPost('/api/save', { root, dir: 'ai-map', label: 'agent', versioned: true });
+  const res = await hubPost('/api/save', { root, dir: 'mindmap', label: 'agent', versioned: true });
   const body = await res.json();
   expect(res.status, JSON.stringify(body)).toBe(200);
   expect(body.current).toEqual({ root, path: FILE });
@@ -42,7 +42,7 @@ test('agent save with no tab: expands shorthand, writes PNG, stays clean when a 
   expect(m.call.startBinding.elementId).toBe('hub');
   expect(m.call.endBinding.elementId).toBe('cv');
   expect(m.cv.boundElements).toEqual(expect.arrayContaining([{ type: 'text', id: 'cv-label' }, { type: 'arrow', id: 'call' }]));
-  const png = fs.readFileSync(path.join(DATA, 'ai-map/ai-map_v1_agent.png'));
+  const png = fs.readFileSync(path.join(DATA, 'mindmap/mindmap_v1_agent.png'));
   expect(png.subarray(1, 4).toString()).toBe('PNG');
 
   // A tab opened later normalizes the scene on its first change: no new labels, still clean.
@@ -62,5 +62,5 @@ test('agent save with no tab: expands shorthand, writes PNG, stays clean when a 
   // Leave the stack as hub.spec.js expects it: fixture files only, empty canvas.
   expect((await hubPost('/api/delete', { root, path: FILE })).ok).toBe(true);
   await fetch(`${CANVAS}/api/elements/clear`, { method: 'DELETE' });
-  expect(fs.existsSync(path.join(DATA, 'ai-map/ai-map_v1_agent.png'))).toBe(false);
+  expect(fs.existsSync(path.join(DATA, 'mindmap/mindmap_v1_agent.png'))).toBe(false);
 });
