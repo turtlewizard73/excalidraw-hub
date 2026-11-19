@@ -1,4 +1,4 @@
-// Pure naming rules for the drawings folder: <project>/<project>_v<i>[_<label>].excalidraw (README, "Naming").
+// Pure naming rules: `<stem>_v<i>[_<label>].excalidraw`, families by stem per folder.
 export const EXT = '.excalidraw';
 export const MAX_NAME = 121;
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
@@ -8,21 +8,6 @@ export function isSafeName(name) {
   return typeof name === 'string' && SAFE.test(name) && !name.includes('..');
 }
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-/** Parse a drawing file name. Returns null for non-.excalidraw files; version/label are null off-scheme. */
-export function parseDrawing(project, file) {
-  if (!file.endsWith(EXT)) return null;
-  const base = file.slice(0, -EXT.length);
-  const m = new RegExp(`^${escapeRe(project)}_v(\\d{1,9})(?:_(.+))?$`).exec(base);
-  return { file, base, version: m ? Number(m[1]) : null, label: m ? (m[2] ?? null) : null };
-}
-
-export function nextVersion(project, files) {
-  const versions = files.map((f) => parseDrawing(project, f)?.version).filter((v) => v !== null && v !== undefined);
-  return versions.length ? Math.max(...versions) + 1 : 0;
-}
-
 /** `<stem>[_<slug of label>].excalidraw`, with the slug cut to fit the name limit. */
 function withLabel(stem, label) {
   const room = Math.min(60, MAX_NAME - stem.length - 1);
@@ -30,27 +15,12 @@ function withLabel(stem, label) {
   return `${stem}${slug ? `_${slug}` : ''}${EXT}`;
 }
 
-export function saveName(project, version, label) {
-  return withLabel(`${project}_v${version}`, label);
+export function saveName(stem, version, label) {
+  return withLabel(`${stem}_v${version}`, label);
 }
 
 /** A blank label, or one with something a file name can use (the slug keeps only a-z and 0-9). */
 export const isUsableLabel = (label) => !String(label ?? '').trim() || /[A-Za-z0-9]/.test(String(label));
-
-/** Target of a save with versioning off. Only "no label, drawing from this project loaded" overwrites. */
-export function plainSaveTarget(project, label, current) {
-  const file = withLabel(project, label);
-  if (file === `${project}${EXT}` && current?.project === project) return { file: current.file, overwrite: true };
-  return { file, overwrite: false };
-}
-
-/** Versioned drawings first (highest first, the highest marked latest), then off-scheme files by name. */
-export function sortDrawings(project, files) {
-  const parsed = files.map((f) => parseDrawing(project, f)).filter(Boolean);
-  const versioned = parsed.filter((d) => d.version !== null).sort((a, b) => b.version - a.version || a.base.localeCompare(b.base));
-  const plain = parsed.filter((d) => d.version === null).sort((a, b) => a.file.localeCompare(b.file));
-  return [...versioned.map((d, i) => ({ ...d, latest: i === 0 })), ...plain.map((d) => ({ ...d, latest: false }))];
-}
 
 // Families by stem per folder (standalone plan, step 3). `<stem>_v<i>[_<label>].excalidraw`; the stem is parsed lazily, so
 // `a_v1_b_v2` is stem `a`, version 1, label `b_v2`. A file without `_v<i>` is its own stem and unversioned. The folder name

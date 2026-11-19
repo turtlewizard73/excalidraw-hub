@@ -7,8 +7,6 @@ import { createBackups } from './backups.js';
 import { createGit, gitRunner, repoTopLevel } from './git.js';
 import { createStore } from './store.js';
 
-export const PRIMARY = 'main'; // TEMPORARY (until step 6): only fixedWorkspace below still uses it
-
 export class WorkspaceError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
@@ -22,18 +20,6 @@ const labelOf = (p) => {
   return parts.at(-1) ?? p;
 };
 const inside = (root, p) => { const rel = path.relative(root, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
-
-/** TEMPORARY (until step 6): a workspace of one folder, for callers that pass store/backups/git directly. */
-export function fixedWorkspace({ store, backups, git = null }) {
-  const folder = { id: PRIMARY, name: 'drawings', path: store.root, primary: true, store, backups, git };
-  return {
-    canAttach: false,
-    folders: () => [folder],
-    get(id = PRIMARY) { if (id !== PRIMARY) throw new WorkspaceError(404, `unknown folder: ${JSON.stringify(id)}`); return folder; },
-    attach: async () => { throw new WorkspaceError(403, 'attaching folders is off (FOLDERS_ROOT not set)'); },
-    detach: async () => { throw new WorkspaceError(400, 'the primary folder cannot be detached'); },
-  };
-}
 
 /**
  * @param {{backupsDir: string, foldersRoot: string, file?: string, autoSyncBranches?: string[], log?: (s: string) => void, repoTop?: Function}} opts

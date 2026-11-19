@@ -5,12 +5,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createBackups } from '../src/backups.js';
-import { createRootStore } from '../src/store.js';
+import { createStore } from '../src/store.js';
 import { listDir } from '../src/tree.js';
 
 let tmp, root, folder;
 const write = async (rel, body = '{"elements":[]}') => { await fs.mkdir(path.dirname(path.join(root, rel)), { recursive: true }); await fs.writeFile(path.join(root, rel), body); };
-const mkFolder = (extra = {}) => ({ path: root, store: createRootStore(root), backups: createBackups(path.join(tmp, 'bk')), repoDir: null, ...extra });
+const mkFolder = (extra = {}) => ({ path: root, store: createStore(root), backups: createBackups(path.join(tmp, 'bk')), repoDir: null, ...extra });
 
 beforeEach(async () => {
   tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-tree-')));

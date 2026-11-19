@@ -1,10 +1,9 @@
-// Drawing files under one root folder. createRootStore (any depth, paths relative to the root) is the model; createStore (project/file,
-// one level) is legacy until step 6 of the standalone plan. Every path goes through `resolve`.
+// Drawing files under one root folder, at any depth. Paths are relative to the root; every path goes through `resolve`.
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
-import { EXT, isSafeName, sortDrawings } from './names.js';
+import { EXT, isSafeName } from './names.js';
 
 export class StoreError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -50,114 +49,6 @@ async function requireFile(p, label) {
   if (!(await isFile(p))) throw new StoreError(404, `${label} not found`);
 }
 
-
-export function createStore(rootDir) {
-  const root = path.resolve(rootDir);
-
-  /** Absolute path for project[/file], or a StoreError. Rejects unsafe names, escapes and symlinks. */
-  async function resolve(project, file) {
-    if (!isSafeName(project)) throw new StoreError(400, `invalid project name: ${JSON.stringify(project)}`);
-    if (file !== undefined && (typeof file !== 'string' || !file.endsWith(EXT) || !isSafeName(file.slice(0, -EXT.length)))) {
-      throw new StoreError(400, `invalid drawing name: ${JSON.stringify(file)}`);
-    }
-    const p = file === undefined ? path.join(root, project) : path.join(root, project, file);
-    if (!p.startsWith(root + path.sep)) throw new StoreError(400, 'path escapes the drawings root');
-    for (const part of file === undefined ? [p] : [path.dirname(p), p]) {
-      const st = await fs.lstat(part).catch(() => null);
-      if (st?.isSymbolicLink()) throw new StoreError(400, 'symlinks are not allowed');
-    }
-    return p;
-  }
-
-  return {
-    root,
-
-    async listProjects() {
-      const entries = await fs.readdir(root, { withFileTypes: true });
-      const projects = [];
-      for (const d of entries.filter((e) => e.isDirectory() && isSafeName(e.name)).sort((a, b) => a.name.localeCompare(b.name))) {
-        const files = (await fs.readdir(path.join(root, d.name), { withFileTypes: true })).filter((f) => f.isFile()).map((f) => f.name);
-        const pngs = new Set(files.filter((f) => f.endsWith('.png')));
-        const drawings = sortDrawings(d.name, files.filter((f) => isSafeName(f.slice(0, -EXT.length))))
-          .map((x) => ({ ...x, png: pngs.has(`${x.base}.png`) }));
-        projects.push({ name: d.name, drawings });
-      }
-      return projects;
-    },
-
-    async files(project) {
-      const dir = await resolve(project);
-      return fs.readdir(dir).catch((e) => { if (e.code === 'ENOENT') return []; throw e; });
-    },
-
-    async read(project, file) {
-      const p = await resolve(project, file);
-      await requireFile(p, `${project}/${file}`);
-      let doc;
-      try { doc = JSON.parse(await fs.readFile(p, 'utf8')); } catch { throw new StoreError(422, `${project}/${file} is not valid JSON`); }
-      if (!doc || typeof doc !== 'object' || !Array.isArray(doc.elements)) throw new StoreError(422, `${project}/${file} has no elements array`);
-      return doc;
-    },
-
-    /** The file's bytes, or null if it does not exist. */
-    async readBytes(project, file) {
-      const p = await resolve(project, file);
-      if (!(await isFile(p))) return null;
-      return fs.readFile(p);
-    },
-
-    /** Write a new file; never overwrites. Creates the project folder if needed. */
-    async create(project, file, doc) {
-      const p = await resolve(project, file);
-      await fs.mkdir(path.dirname(p), { recursive: true });
-      const tmp = await writeTemp(p, file, doc);
-      try { await moveAll([[tmp, p]]); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
-    },
-
-    /** Identifies this state of a file (null if missing), to notice changes made outside the hub. */
-    async stamp(project, file) {
-      const st = await fs.lstat(await resolve(project, file)).catch(() => null);
-      return st ? `${st.mtimeMs}:${st.size}` : null;
-    },
-
-    /** Replace `file` atomically, or create it if missing. Only for the drawing the user has loaded. */
-    async overwrite(project, file, doc) {
-      const p = await resolve(project, file);
-      if (await exists(p) && !(await isFile(p))) throw new StoreError(409, `${project}/${file} is not a regular file`);
-      await fs.mkdir(path.dirname(p), { recursive: true });
-      const tmp = await writeTemp(p, file, doc);
-      try { await fs.rename(tmp, p); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
-    },
-
-    /** Replace the drawing's same-named .png atomically. Refuses if that name is not a regular file. */
-    async writePng(project, file, bytes) {
-      const png = pngOf(await resolve(project, file));
-      if (await exists(png) && !(await isFile(png))) throw new StoreError(409, `${path.basename(png)} is not a regular file`);
-      const tmp = await writeTemp(png, path.basename(png), bytes);
-      try { await fs.rename(tmp, png); } catch (e) { await fs.unlink(tmp).catch(() => {}); throw e; }
-    },
-
-    /** Rename within the project; the same-named .png moves along. */
-    async rename(project, file, newFile) {
-      const src = await resolve(project, file);
-      const dest = await resolve(project, newFile);
-      await requireFile(src, `${project}/${file}`);
-      if (src === dest) return;
-      for (const p of [dest, pngOf(dest)]) if (await exists(p)) throw new StoreError(409, `${path.basename(p)} already exists`);
-      const pngExists = await exists(pngOf(src));
-      if (pngExists && !(await isFile(pngOf(src)))) throw new StoreError(409, `${path.basename(pngOf(src))} is not a regular file`);
-      await moveAll(pngExists ? [[src, dest], [pngOf(src), pngOf(dest)]] : [[src, dest]]);
-    },
-
-    /** Delete a drawing and its same-named .png. */
-    async remove(project, file) {
-      const p = await resolve(project, file);
-      await requireFile(p, `${project}/${file}`);
-      await fs.unlink(p);
-      if (await isFile(pngOf(p))) await fs.unlink(pngOf(p));
-    },
-  };
-}
 
 const insideDir = (dir, p) => { const rel = path.relative(dir, p); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 const badSegment = (s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s);
@@ -206,7 +97,7 @@ export async function moveDrawing(src, rel, dest, newRel, { rename = fs.rename }
  * The files of one root folder, at any depth. Paths are relative to the root, POSIX separators ('' is the root itself).
  * Every path is checked: no empty, '.' or '..' segments, and no symlink may lead out of the root (400).
  */
-export function createRootStore(rootDir, { rename = fs.rename } = {}) {
+export function createStore(rootDir, { rename = fs.rename } = {}) {
   const root = path.resolve(rootDir);
 
   async function resolve(rel = '') {
