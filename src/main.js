@@ -1,45 +1,25 @@
-// Entry point. Configuration comes from the environment (compose.yaml).
-import path from 'node:path';
+// Entry point. All configuration comes from src/config.js.
 import { createCanvas } from './canvas.js';
-import { createGit, gitRunner, repoTopLevel } from './git.js';
+import { loadConfig } from './config.js';
 import { checkDrawingsDir } from './mounts.js';
 import { createServer } from './server.js';
 import { createWorkspace } from './workspace.js';
 
-const port = Number(process.env.HUB_PORT ?? 3080);
-const host = process.env.HUB_HOST ?? '127.0.0.1';
-const canvasUrl = process.env.CANVAS_URL ?? 'http://127.0.0.1:3000';
-const canvasPublicUrl = process.env.CANVAS_PUBLIC_URL ?? canvasUrl;
-const drawings = path.resolve(process.env.DRAWINGS_DIR ?? '/data');
-const backupsDir = process.env.BACKUPS_DIR ?? '/backups';
-// Attached folders (spec: workspace folders): saved in WORKSPACE_FILE, allowed only inside FOLDERS_ROOT (unset = off).
-const workspaceFile = path.resolve(process.env.WORKSPACE_FILE ?? 'workspace/workspace.json');
-const foldersRoot = process.env.FOLDERS_ROOT || null;
+const cfg = loadConfig();
 
-// Exit: under Docker the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race");
-// scripts/native.sh shows this message and stops.
-const notReady = await checkDrawingsDir(drawings);
-if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it; scripts/native.sh stops)`); process.exit(1); }
-
-// Git sync is on when REPO_DIR is the top of a git work tree and contains the drawings folder (spec: standalone).
-// A folder that merely sits inside some other repo (e.g. the default ./drawings inside this checkout) gets no sync.
-let git = null;
-const repo = process.env.REPO_DIR ? path.resolve(process.env.REPO_DIR) : null;
-if (repo) {
-  const rel = path.relative(repo, drawings);
-  const top = await repoTopLevel(repo);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) console.error(`git sync off: ${drawings} is not inside REPO_DIR ${repo}`);
-  else if (!top.ok) console.error(`git sync off: ${top.reason}`);
-  else git = createGit({ run: gitRunner(repo), drawingsPath: rel, branch: process.env.SYNC_BRANCH || 'main' });
+// Exit: under Docker the restart policy retries until Docker Desktop has connected the mount (spec: "Boot race").
+if (cfg.waitForMount) {
+  const notReady = await checkDrawingsDir(cfg.foldersRoot);
+  if (notReady) { console.error(`excalidraw-hub not starting: ${notReady}; exiting (Docker restarts it)`); process.exit(1); }
 }
 
-const workspace = await createWorkspace({ primary: { path: drawings, git }, backupsDir, file: workspaceFile, foldersRoot });
+// TEMPORARY BRIDGE (step 1): workspace.js still requires a primary folder until step 2 removes it. FOLDERS_ROOT stands in, with no git sync.
+const workspace = await createWorkspace({ primary: { path: cfg.foldersRoot, git: null }, backupsDir: cfg.backupsDir, file: cfg.statePath, foldersRoot: cfg.foldersRoot });
 const server = createServer({
   workspace,
-  canvas: createCanvas(canvasUrl),
-  canvasPublicUrl,
-  // Host header allowlist (DNS-rebinding guard). Default: the loopback names a local browser uses.
-  allowedHosts: process.env.HUB_ALLOWED_HOSTS ? process.env.HUB_ALLOWED_HOSTS.split(',').map((h) => h.trim()) : [`127.0.0.1:${port}`, `localhost:${port}`],
+  canvas: createCanvas(cfg.canvasUrl),
+  canvasPublicUrl: cfg.canvasPublicUrl,
+  allowedHosts: cfg.allowedHosts,
 });
-server.listen(port, host, () => console.log(`excalidraw-hub on http://${host}:${port} (drawings ${drawings}, ${workspace.folders().length - 1} attached folder(s) from ${workspaceFile}${foldersRoot ? ` (attach inside ${foldersRoot})` : ', attaching off'}, backups ${backupsDir}, git sync ${git ? `on, branch ${git.syncBranch}` : 'off'}, canvas ${canvasUrl})`));
+server.listen(cfg.port, cfg.host, () => console.log(`excalidraw-hub on http://${cfg.host}:${cfg.port} (state ${cfg.statePath}, folders root ${cfg.foldersRoot}, backups ${cfg.backupsDir}, canvas ${cfg.canvasUrl})`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => process.exit(0)));
