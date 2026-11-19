@@ -49,7 +49,7 @@ test.describe.configure({ mode: 'serial' });
 let page, frame, iframeBox;
 
 const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
-const drawing = (file) => page.locator(`li[data-testid="drawing"][data-file="${file}"]`);
+const drawing = (file) => page.locator(`[data-testid="drawing"][data-file="${file}"]`);
 const fit = () => post(`${CANVAS}/api/viewport`, { scrollToContent: true });
 const settle = (ms = 1500) => page.waitForTimeout(ms);
 const codeBlocks = async () => (await (await fetch(`${CANVAS}/api/elements`)).json()).elements.filter((e) => e.customData?.kind === 'codeblock');

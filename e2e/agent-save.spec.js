@@ -3,14 +3,11 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-
-const DATA = process.env.DATA_DIR;
+import { DATA, hubPost, rootId } from './helpers.js';
 const CANVAS = process.env.CANVAS_URL;
-const HUB = process.env.HUB_URL;
 const json = (r) => r.json();
 const canvasGet = (p) => fetch(CANVAS + p).then(json);
-const hubPost = (p, body) => fetch(HUB + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-const status = () => fetch(`${HUB}/api/status`).then(json);
+const status = () => fetch(`${process.env.HUB_URL}/api/status`).then(json);
 const FILE = 'ai-map/ai-map_v1_agent.excalidraw';
 
 test('agent save with no tab: expands shorthand, writes PNG, stays clean when a tab opens later', async ({ browser }) => {
@@ -28,10 +25,11 @@ test('agent save with no tab: expands shorthand, writes PNG, stays clean when a 
   expect(created.ok).toBe(true);
   expect((await status()).agentElements).toBe(4);
 
-  const res = await hubPost('/api/save', { project: 'ai-map', label: 'agent', versioned: true });
+  const root = await rootId();
+  const res = await hubPost('/api/save', { root, dir: 'ai-map', label: 'agent', versioned: true });
   const body = await res.json();
   expect(res.status, JSON.stringify(body)).toBe(200);
-  expect(body.current.file).toBe('ai-map_v1_agent.excalidraw');
+  expect(body.current).toEqual({ root, path: FILE });
   expect(body.png, body.pngError).toBe(true);
   const after = await status();
   expect(after.dirty).toBe(false);
@@ -62,7 +60,7 @@ test('agent save with no tab: expands shorthand, writes PNG, stays clean when a 
   await page.close();
 
   // Leave the stack as hub.spec.js expects it: fixture files only, empty canvas.
-  expect((await hubPost('/api/delete', { project: 'ai-map', file: 'ai-map_v1_agent.excalidraw' })).ok).toBe(true);
+  expect((await hubPost('/api/delete', { root, path: FILE })).ok).toBe(true);
   await fetch(`${CANVAS}/api/elements/clear`, { method: 'DELETE' });
   expect(fs.existsSync(path.join(DATA, 'ai-map/ai-map_v1_agent.png'))).toBe(false);
 });

@@ -1,44 +1,20 @@
-// End-to-end: the real hub page, the real canvas in its iframe, a fixture copy on disk (read-only here).
+// End-to-end: the real hub page, the real canvas in its iframe, a fixture copy on disk (read-only here, except where noted).
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { act, BACKUPS, canvasCount, DATA, drawRectangle, drawing, exists, folder, hubPage, loadDrawing, open, pick, readDoc, rootId } from './helpers.js';
 
-const DATA = process.env.DATA_DIR;
-const BACKUPS = process.env.BACKUPS_DIR;
 const remoteDev = () => fs.readFileSync(path.join(process.env.REMOTE_DIR, 'refs/heads/dev'), 'utf8').trim();
-const CANVAS = process.env.CANVAS_URL;
-const readDoc = (rel) => JSON.parse(fs.readFileSync(path.join(DATA, rel), 'utf8'));
-const exists = (rel) => fs.existsSync(path.join(DATA, rel));
-const canvasCount = async () => (await (await fetch(`${CANVAS}/api/elements`)).json()).elements.filter((e) => !e.isDeleted).length;
-const drawing = (page, file) => page.locator(`li[data-testid="drawing"][data-file="${file}"]`);
+const P = { v1: 'budgeting/budgeting_v1_plan_with_proposal.excalidraw', v0: 'budgeting/budgeting_v0_plan.excalidraw' };
 
 test.describe.configure({ mode: 'serial' });
-let page;
+let page, root;
 
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
-  await page.goto('/');
-  await expect(page.frameLocator('#canvas').getByText('Connected', { exact: true })).toBeVisible({ timeout: 20000 });
+  page = await hubPage(browser);
+  root = await rootId();
 });
 test.afterAll(async () => { await page.close(); });
-
-async function drawRectangle() {
-  const before = await canvasCount();
-  await drawRectangleOnly();
-  // The badge can turn on before the tab has synced the new rectangle; wait for the canvas server to hold it.
-  await expect.poll(canvasCount, { timeout: 10000 }).toBe(before + 1);
-}
-
-async function drawRectangleOnly() {
-  const frame = page.frameLocator('#canvas');
-  await frame.locator('[data-testid="toolbar-rectangle"]').click({ force: true });
-  const box = await page.locator('#canvas').boundingBox();
-  await page.mouse.move(box.x + box.width - 260, box.y + box.height - 220);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 120, box.y + box.height - 100, { steps: 8 });
-  await page.mouse.up();
-  await frame.locator('[data-testid="toolbar-selection"]').click({ force: true });
-}
 
 test('save buttons: Save and Save new version; Revert off with nothing loaded', async () => {
   await expect(page.getByTestId('save')).toHaveText('Save');
@@ -47,21 +23,27 @@ test('save buttons: Save and Save new version; Revert off with nothing loaded', 
   await expect(page.locator('#save-versioned')).toHaveCount(0);
 });
 
-test('list: projects and versions, latest marked, off-scheme files listed plainly', async () => {
-  await expect(page.locator('details[data-project]')).toHaveCount(6);
-  const names = await page.locator('details[data-project]').evaluateAll((els) => els.map((e) => e.dataset.project));
-  expect(names).toEqual(['ai-map', 'budgeting', 'excalidraw-test', 'f1-title-2026', 'image-test', 'nested']);
-  await expect(page.locator('details[data-project="budgeting"] li').first()).toHaveAttribute('data-file', 'budgeting_v1_plan_with_proposal.excalidraw');
-  await expect(drawing(page, 'budgeting_v1_plan_with_proposal.excalidraw').locator('.tag')).toHaveText('latest');
-  await expect(drawing(page, 'budgeting_v0_plan.excalidraw').locator('.tag')).toHaveCount(0);
-  await expect(drawing(page, 'board-before-clear.excalidraw').locator('.tag')).toHaveText('unversioned');
-  await expect(drawing(page, 'board-with-f1.excalidraw').locator('.tag')).toHaveText('unversioned');
+test('explorer: the attached folder is a root; folders list lazily; latest marked, off-scheme files listed plainly', async () => {
+  expect(root).toMatch(/^f-[0-9a-f]{12}$/);
+  await expect(folder(page, root)).toContainText('repo');
+  await expect(folder(page, root)).toHaveAttribute('data-expanded', 'true');
+  const paths = await page.locator(`[data-testid="folder"][data-root="${root}"]`).evaluateAll((els) => els.map((e) => e.dataset.path));
+  expect(paths).toEqual(['', 'ai-map', 'budgeting', 'excalidraw-test', 'f1-title-2026', 'image-test', 'nested']);
+  // Closed folders list nothing yet.
+  await expect(page.locator('[data-testid="drawing"]')).toHaveCount(0);
+  for (const dir of ['ai-map', 'budgeting', 'f1-title-2026', 'image-test']) await open(page, root, dir);
+  await expect(page.locator('[data-testid="drawing"][data-path^="budgeting/"]').first()).toHaveAttribute('data-path', P.v1);
+  await expect(drawing(page, root, P.v1).locator('.tag')).toHaveText('latest');
+  await expect(drawing(page, root, P.v0).locator('.tag')).toHaveCount(0);
+  await expect(drawing(page, root, 'ai-map/board-before-clear.excalidraw').locator('.tag')).toHaveText('unversioned');
+  await expect(drawing(page, root, 'f1-title-2026/board-with-f1.excalidraw').locator('.tag')).toHaveText('unversioned');
 });
 
-test('load: drawing appears on the canvas and the page is clean', async () => {
-  await drawing(page, 'budgeting_v1_plan_with_proposal.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v1_plan_with_proposal.excalidraw');
-  expect(await canvasCount()).toBe(readDoc('budgeting/budgeting_v1_plan_with_proposal.excalidraw').elements.filter((e) => !e.isDeleted).length);
+test('load: drawing appears on the canvas, its folder is selected, the page is clean', async () => {
+  await loadDrawing(page, root, P.v1);
+  await expect(page.getByTestId('current')).toHaveText('repo / budgeting / budgeting_v1_plan_with_proposal.excalidraw');
+  await expect(page.getByTestId('save-target')).toHaveText('Save into repo / budgeting');
+  expect(await canvasCount()).toBe(readDoc(P.v1).elements.filter((e) => !e.isDeleted).length);
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   // A harmless interaction makes the tab re-sync and normalize the scene; still clean.
   await page.frameLocator('#canvas').locator('[data-testid="toolbar-hand"]').click({ force: true });
@@ -71,7 +53,7 @@ test('load: drawing appears on the canvas and the page is clean', async () => {
 });
 
 test('unsaved: drawing in the canvas shows the indicator', async () => {
-  await drawRectangle();
+  await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
 });
 
@@ -90,27 +72,27 @@ test('unsaved: leaving the page warns', async () => {
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes');
 });
 
-test('save: writes the next version with the edit and becomes clean', async () => {
-  const before = readDoc('budgeting/budgeting_v1_plan_with_proposal.excalidraw').elements.length;
-  await page.getByTestId('save-project').fill('budgeting');
+test('save: writes the next version into the selected folder with the edit and becomes clean', async () => {
+  const before = readDoc(P.v1).elements.length;
   await page.getByTestId('save-label').fill('E2E edit');
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved budgeting/budgeting_v2_e2e_edit.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/budgeting/budgeting_v2_e2e_edit.excalidraw and its .png');
   const saved = readDoc('budgeting/budgeting_v2_e2e_edit.excalidraw');
   expect(saved.elements.length).toBe(before + 1);
   expect(saved.elements.some((e) => 'syncedAt' in e || 'createdAt' in e)).toBe(false);
+  expect(exists('budgeting/budgeting_v2_e2e_edit.png')).toBe(true);
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
-  await expect(drawing(page, 'budgeting_v2_e2e_edit.excalidraw').locator('.tag')).toHaveText('latest');
-  expect(readDoc('budgeting/budgeting_v1_plan_with_proposal.excalidraw').elements.length).toBe(before);
+  await expect(drawing(page, root, 'budgeting/budgeting_v2_e2e_edit.excalidraw').locator('.tag')).toHaveText('latest');
+  expect(readDoc(P.v1).elements.length).toBe(before);
 });
 
 test('save: image files, freedraw and appState survive load → edit → save', async () => {
-  await drawing(page, 'image-test_v0_red_png.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('image-test / image-test_v0_red_png.excalidraw');
-  await drawRectangle();
+  await loadDrawing(page, root, 'image-test/image-test_v0_red_png.excalidraw');
+  await expect(page.getByTestId('current')).toHaveText('repo / image-test / image-test_v0_red_png.excalidraw');
+  await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw and its .png');
   const orig = readDoc('image-test/image-test_v0_red_png.excalidraw');
   const saved = readDoc('image-test/image-test_v1.excalidraw');
   expect(saved.files).toEqual(orig.files);
@@ -124,10 +106,10 @@ test('Save: overwrites the loaded drawing, adds no file, refuses to overwrite an
   const file = 'image-test/image-test_v1.excalidraw';
   const before = readDoc(file).elements.length;
   const listed = fs.readdirSync(path.join(DATA, 'image-test')).sort();
-  await drawRectangle();
+  await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved image-test/image-test_v1.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw and its .png');
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   expect(readDoc(file).elements.length).toBe(before + 1);
   expect(fs.readdirSync(path.join(DATA, 'image-test')).sort()).toEqual(listed);
@@ -148,8 +130,8 @@ test('Revert: brings back the state before the last Save, then is off again', as
   let popup = '';
   page.once('dialog', (d) => { popup = d.message(); d.accept(); });
   await page.getByTestId('revert').click();
-  await expect(page.getByTestId('message')).toHaveText('Reverted image-test/image-test_v1.excalidraw (0 earlier states left)');
-  expect(popup).toContain('Revert image-test/image-test_v1.excalidraw to its previous saved state?');
+  await expect(page.getByTestId('message')).toHaveText('Reverted repo/image-test/image-test_v1.excalidraw (0 earlier states left)');
+  expect(popup).toContain('Revert repo/image-test/image-test_v1.excalidraw to its previous saved state?');
   expect(readDoc(file).elements.length).toBe(n - 1);
   expect(await canvasCount()).toBe(n - 1);
   await expect(page.getByTestId('revert')).toBeDisabled();
@@ -159,61 +141,66 @@ test('Revert: brings back the state before the last Save, then is off again', as
 test('switching drawings saves unsaved changes into the open file without asking', async () => {
   const file = 'image-test/image-test_v1.excalidraw';
   const n = readDoc(file).elements.length;
-  await drawRectangle();
+  await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   let asked = false;
   page.once('dialog', (d) => { asked = true; d.dismiss(); });
-  await drawing(page, 'budgeting_v0_plan.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v0_plan.excalidraw');
-  await expect(page.getByTestId('message')).toContainText('Your changes were saved to image-test/image-test_v1.excalidraw first (to undo: load it and press Revert)');
+  await loadDrawing(page, root, P.v0);
+  await expect(page.getByTestId('current')).toHaveText('repo / budgeting / budgeting_v0_plan.excalidraw');
+  await expect(page.getByTestId('message')).toContainText('Your changes were saved to repo/image-test/image-test_v1.excalidraw first (to undo: load it and press Revert)');
   expect(asked).toBe(false);
   expect(readDoc(file).elements.length).toBe(n + 1);
-  expect(fs.readdirSync(path.join(BACKUPS, 'image-test', 'image-test_v1')).length).toBe(1);
+  expect(fs.readdirSync(path.join(BACKUPS, root, 'image-test', 'image-test_v1')).length).toBe(1);
   page.removeAllListeners('dialog');
 });
 
 test('rename: moves the file, keeps the current drawing in sync', async () => {
-  await drawing(page, 'budgeting_v2_e2e_edit.excalidraw').locator('button.open').click();
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v2_e2e_edit.excalidraw');
+  await loadDrawing(page, root, 'budgeting/budgeting_v2_e2e_edit.excalidraw');
+  await expect(page.getByTestId('current')).toHaveText('repo / budgeting / budgeting_v2_e2e_edit.excalidraw');
   page.once('dialog', (d) => d.accept('budgeting_v2_renamed'));
-  await drawing(page, 'budgeting_v2_e2e_edit.excalidraw').locator('[data-action="rename"]').click({ force: true });
-  await expect(drawing(page, 'budgeting_v2_renamed.excalidraw')).toBeVisible();
+  await act(drawing(page, root, 'budgeting/budgeting_v2_e2e_edit.excalidraw'), 'rename');
+  await expect(drawing(page, root, 'budgeting/budgeting_v2_renamed.excalidraw')).toBeVisible();
   expect(exists('budgeting/budgeting_v2_renamed.excalidraw')).toBe(true);
   expect(exists('budgeting/budgeting_v2_e2e_edit.excalidraw')).toBe(false);
-  await expect(page.getByTestId('current')).toHaveText('budgeting / budgeting_v2_renamed.excalidraw');
+  expect(exists('budgeting/budgeting_v2_renamed.png')).toBe(true);
+  await expect(page.getByTestId('current')).toHaveText('repo / budgeting / budgeting_v2_renamed.excalidraw');
 });
 
 test('rename: refuses traversal and existing names', async () => {
+  const row = drawing(page, root, 'budgeting/budgeting_v2_renamed.excalidraw');
   page.once('dialog', (d) => d.accept('../ai-map/evil'));
-  await drawing(page, 'budgeting_v2_renamed.excalidraw').locator('[data-action="rename"]').click({ force: true });
+  await act(row, 'rename');
   await expect(page.getByTestId('message')).toContainText('Rename failed: invalid new name');
   page.once('dialog', (d) => d.accept('budgeting_v0_plan'));
-  await drawing(page, 'budgeting_v2_renamed.excalidraw').locator('[data-action="rename"]').click({ force: true });
+  await act(row, 'rename');
   await expect(page.getByTestId('message')).toContainText('already exists');
   expect(exists('budgeting/budgeting_v2_renamed.excalidraw')).toBe(true);
 });
 
-test('sync: on dev, commits the project folder and pushes; then nothing to sync', async () => {
+test('sync: on dev, commits the folder and pushes without asking; then nothing to sync', async () => {
   const before = remoteDev();
-  await page.locator('details[data-project="budgeting"] summary [data-action="sync"]').click({ force: true });
+  const budgeting = folder(page, root, 'budgeting');
+  await act(budgeting, 'sync');
   await expect(page.getByTestId('message')).toContainText('Synced: "budgeting ', { timeout: 30000 });
   await expect(page.getByTestId('message')).toContainText('diagram update"');
   await expect(page.getByTestId('message')).toContainText('pushed to dev');
   expect(remoteDev()).not.toBe(before);
-  await page.locator('details[data-project="budgeting"] summary [data-action="sync"]').click({ force: true });
+  await act(budgeting, 'sync');
   await expect(page.getByTestId('message')).toHaveText('Nothing to sync in budgeting');
-  await expect(page.locator('details[data-project="budgeting"]')).toHaveAttribute('open', '');
+  await expect(folder(page, root, 'budgeting')).toHaveAttribute('data-expanded', 'true');
 });
 
 test('delete: cancel keeps the file, confirm removes it and its png', async () => {
+  await pick(page, root, 'ai-map');
+  const row = drawing(page, root, 'ai-map/ai-map_v0.excalidraw');
   page.once('dialog', (d) => d.dismiss());
-  await drawing(page, 'ai-map_v0.excalidraw').locator('[data-action="delete"]').click({ force: true });
+  await act(row, 'delete');
   await page.waitForTimeout(500);
   expect(exists('ai-map/ai-map_v0.excalidraw')).toBe(true);
   let message = '';
   page.once('dialog', (d) => { message = d.message(); d.accept(); });
-  await drawing(page, 'ai-map_v0.excalidraw').locator('[data-action="delete"]').click({ force: true });
-  await expect(drawing(page, 'ai-map_v0.excalidraw')).toHaveCount(0);
+  await act(row, 'delete');
+  await expect(row).toHaveCount(0);
   expect(message).toContain('and its .png');
   expect(exists('ai-map/ai-map_v0.excalidraw')).toBe(false);
   expect(exists('ai-map/ai-map_v0.png')).toBe(false);

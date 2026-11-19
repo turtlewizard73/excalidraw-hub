@@ -103,8 +103,8 @@ function drawingRow(f, d) {
   const row = el('div', `row drawing${active ? ' active' : ''}`);
   Object.assign(row.dataset, { testid: 'drawing', root: f.id, path: d.path, file: d.file });
   row.draggable = true;
-  row.ondragstart = (ev) => { dragged = { root: f.id, path: d.path }; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', d.path); };
-  row.ondragend = () => { dragged = null; document.querySelectorAll('.drop').forEach((x) => x.classList.remove('drop')); };
+  row.ondragstart = (ev) => { dragged = { root: f.id, path: d.path }; document.body.classList.add('dragging'); ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', d.path); };
+  row.ondragend = () => { dragged = null; document.body.classList.remove('dragging'); document.querySelectorAll('.drop').forEach((x) => x.classList.remove('drop')); };
   const open = el('button', 'open', d.base);
   open.type = 'button';
   open.title = `Load ${d.path} from ${f.path}`;
@@ -293,7 +293,7 @@ async function syncFolder(f, path, answered = []) {
     if (res.needsConfirm) {
       return confirm(`Commit and push ${label} on branch ${res.branch}?`) ? syncFolder(f, path, [...answered, res.needsConfirm]) : say(`Sync of ${label} cancelled; nothing changed`);
     }
-    if (res.nothing) return say(`Nothing to sync in ${label}${res.fastForwarded ? ` (checkout updated: ${res.fastForwarded} commit(s) pulled)` : ''}`);
+    if (res.nothing) { say(`Nothing to sync in ${label}${res.fastForwarded ? ` (checkout updated: ${res.fastForwarded} commit(s) pulled)` : ''}`); return refreshList(); } // a fast-forward may have brought new files
     const pulled = res.fastForwarded ? `; checkout updated (${res.fastForwarded} commit(s) pulled)` : res.notUpdated ? `; checkout not updated: ${res.notUpdated}` : '';
     if (res.noUpstream) say(`Committed "${res.message}" on ${res.branch} (${res.sha}), no upstream branch: not pushed`);
     else if (!res.pushed) fail('Push', new Error(`Committed "${res.message}" (${res.sha}), but the push failed:\n${res.pushError}`));
@@ -336,22 +336,28 @@ function applyLayout() {
 }
 const toggleSidebar = () => { view.hidden = !view.hidden; saveView(); applyLayout(); };
 
+// The shield goes up on mousedown, so the iframe never swallows the drag. It also swallows the click, so a double-click on
+// the handle is counted here: two releases without movement within 400 ms.
+let lastClick = 0;
 $('resizer').addEventListener('mousedown', (ev) => {
   ev.preventDefault();
-  $('shield').hidden = false; // the iframe would swallow the mouse otherwise
+  $('shield').hidden = false;
   $('resizer').classList.add('dragging');
-  const move = (e) => { view.width = clampWidth(e.clientX - $('sidebar').getBoundingClientRect().left); applyLayout(); };
+  let moved = false;
+  const move = (e) => { moved = true; view.width = clampWidth(e.clientX - $('sidebar').getBoundingClientRect().left); applyLayout(); };
   const stop = () => {
     window.removeEventListener('mousemove', move);
     window.removeEventListener('mouseup', stop);
     $('shield').hidden = true;
     $('resizer').classList.remove('dragging');
+    if (!moved && Date.now() - lastClick < 400) view.width = W_DEFAULT;
+    lastClick = moved ? 0 : Date.now();
     saveView();
+    applyLayout();
   };
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', stop);
 });
-$('resizer').addEventListener('dblclick', () => { view.width = W_DEFAULT; saveView(); applyLayout(); });
 $('toggle-sidebar').addEventListener('click', toggleSidebar);
 document.addEventListener('keydown', (ev) => { if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === 'b') { ev.preventDefault(); toggleSidebar(); } });
 window.addEventListener('resize', applyLayout);

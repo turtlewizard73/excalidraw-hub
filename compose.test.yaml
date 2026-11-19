@@ -1,5 +1,7 @@
 # Isolated test stack: own canvas, hub over a fixture copy, Playwright runner, all on the compose network.
 # Published on 127.0.0.1:3100 / :3180 for debugging only. Never touches the real canvas (:3000) or the real drawings.
+# One temp folder (HUB_TEST_DIR, made by scripts/e2e.sh) holds the throwaway repo, its bare origin, the backups, the state
+# file and a second folder to attach. It is FOLDERS_ROOT and is mounted at the same path in the hub and the runner.
 # Run via scripts/e2e.sh.
 name: excalidraw-hub-test
 services:
@@ -28,22 +30,15 @@ services:
       CANVAS_URL: http://canvas:3000
       CANVAS_PUBLIC_URL: http://canvas:3000
       HOME: /tmp
-      REPO_DIR: /repo
-      DRAWINGS_DIR: /repo/docs/drawings
-      BACKUPS_DIR: /backups
-      SYNC_BRANCH: dev
-      WORKSPACE_FILE: /tmp/workspace.json   # never the real workspace/
-      FOLDERS_ROOT: "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"   # a temp folder to attach from, same path as on the host
+      FOLDERS_ROOT: "${HUB_TEST_DIR:?set by scripts/e2e.sh}"
+      HUB_STATE: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/state/hub.json"
+      BACKUPS_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/backups"
       GIT_AUTHOR_NAME: e2e
       GIT_AUTHOR_EMAIL: e2e@example.invalid
       GIT_COMMITTER_NAME: e2e
       GIT_COMMITTER_EMAIL: e2e@example.invalid
     volumes:
-      # A throwaway repo (fixtures under docs/drawings) whose origin is the bare repo at /remote. Never the real one.
-      - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo"
-      - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote"
-      - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups"
-      - "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"
+      - "${HUB_TEST_DIR:?set by scripts/e2e.sh}:${HUB_TEST_DIR:?set by scripts/e2e.sh}"
     depends_on: [canvas]
   e2e:
     build:
@@ -54,15 +49,19 @@ services:
     environment:
       HUB_URL: http://hub:3180
       CANVAS_URL: http://canvas:3000
-      DATA_DIR: /repo/docs/drawings
-      BACKUPS_DIR: /backups
-      REMOTE_DIR: /remote
-      EXTRA_DIR: "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}"
+      DATA_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/repo/docs/drawings"
+      REPO_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/repo"
+      BACKUPS_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/backups"
+      REMOTE_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/remote.git"
+      EXTRA_DIR: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/extra"
+      STATE_FILE: "${HUB_TEST_DIR:?set by scripts/e2e.sh}/state/hub.json"
+      GIT_AUTHOR_NAME: e2e
+      GIT_AUTHOR_EMAIL: e2e@example.invalid
+      GIT_COMMITTER_NAME: e2e
+      GIT_COMMITTER_EMAIL: e2e@example.invalid
       HOME: /tmp
     volumes:
-      - "${HUB_TEST_REPO:?set by scripts/e2e.sh}:/repo:ro"
-      - "${HUB_TEST_REMOTE:?set by scripts/e2e.sh}:/remote:ro"
-      - "${HUB_TEST_BACKUPS:?set by scripts/e2e.sh}:/backups:ro"
-      - "${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:${HUB_TEST_EXTRA:?set by scripts/e2e.sh}:ro"
+      # Read-write: the sync test pushes to the bare origin and writes a drawing into the checkout, as a user would.
+      - "${HUB_TEST_DIR:?set by scripts/e2e.sh}:${HUB_TEST_DIR:?set by scripts/e2e.sh}"
       - "./test-results:/e2e/test-results"
     depends_on: [hub]

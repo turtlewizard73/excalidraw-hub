@@ -40,3 +40,5 @@ header { display: flex; align-items: center; gap: 10px; padding: 6px 10px; borde
 #save-form input { width: 140px; }
 #message.error { color: #c92a2a; }
 iframe { flex: 1; border: 0; width: 100%; }
+/* While a drawing is dragged, a folder row is one drop target: its children must not fire enter/leave events. */
+body.dragging .folder > * { pointer-events: none; }
