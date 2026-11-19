@@ -62,7 +62,7 @@ test('detach: refused while its drawing is loaded', async () => {
 });
 
 test('drag across roots: the drawing, its png and its Revert history move; Revert still works', async () => {
-  const hist = path.join(BACKUPS, other, 'notes', 'notes_v0');
+  const hist = path.join(BACKUPS, other, 'notes', 'notes_v0.excalidraw');
   expect(fs.readdirSync(hist)).toHaveLength(1); // the overwrite above kept the old file
   // The highlight, with synthetic drag events (Playwright's real drag does not leave the pointer over a target to look at).
   const src = drawing(page, other, NOTE);
@@ -84,7 +84,7 @@ test('drag across roots: the drawing, its png and its Revert history move; Rever
   expect(exists('mindmap/notes_v0.png')).toBe(true);
   expect(exists(NOTE, OTHER)).toBe(false);
   expect(exists('notes/notes_v0.png', OTHER)).toBe(false);
-  expect(fs.readdirSync(path.join(BACKUPS, main, 'mindmap', 'notes_v0'))).toHaveLength(1);
+  expect(fs.readdirSync(path.join(BACKUPS, main, 'mindmap', 'notes_v0.excalidraw'))).toHaveLength(1);
   expect(fs.existsSync(hist)).toBe(false);
   await expect(page.getByTestId('current')).toHaveText('repo / mindmap / notes_v0.excalidraw');
   await expect(drawing(page, main, 'mindmap/notes_v0.excalidraw')).toBeVisible();

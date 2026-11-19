@@ -150,7 +150,7 @@ test('switching drawings saves unsaved changes into the open file without asking
   await expect(page.getByTestId('message')).toContainText('Your changes were saved to repo/image-test/image-test_v1.excalidraw first (to undo: load it and press Revert)');
   expect(asked).toBe(false);
   expect(readDoc(file).elements.length).toBe(n + 1);
-  expect(fs.readdirSync(path.join(BACKUPS, root, 'image-test', 'image-test_v1')).length).toBe(1);
+  expect(fs.readdirSync(path.join(BACKUPS, root, 'image-test', 'image-test_v1.excalidraw')).length).toBe(1);
   page.removeAllListeners('dialog');
 });
 
