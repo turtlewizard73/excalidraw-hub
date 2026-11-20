@@ -1,4 +1,5 @@
-// Code blocks on the canvas: create on paste, hover toggle Code/Diagram, edit dialog.
+// Code blocks on the canvas: create on paste, Code/Diagram toggle + Edit buttons above the block, edit dialog.
+// The buttons belong to the selected code block (if exactly one is selected), else to the hovered one.
 // App.tsx wires it in with useCodeBlocks(api): pass onPaste/onPointerUpdate to <Excalidraw>, render `layer`.
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CaptureUpdateAction, convertToExcalidrawElements, sceneCoordsToViewportCoords } from '@excalidraw/excalidraw'
@@ -62,22 +63,33 @@ interface EditorState { id: string | null; lang: CodeLang; source: string }
 export function useCodeBlocks(api: ExcalidrawImperativeAPI | null) {
   const pointer = useRef<{ x: number; y: number } | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [busy, setBusy] = useState(false)
   const [, setTick] = useState(0)
 
-  // Keep the hover buttons attached while the view scrolls/zooms or the block moves.
-  // Only when the hovered block's box on screen changes: onChange also fires when App re-renders,
+  // Track the selected code block, and keep the buttons attached while the view scrolls/zooms or the block moves.
+  // setState only when something changed: onChange also fires when App re-renders,
   // so an unconditional setState here loops (React #185).
   const hoveredIdRef = useRef<string | null>(null)
   hoveredIdRef.current = hoveredId
+  const selectedIdRef = useRef<string | null>(null)
+  selectedIdRef.current = selectedId
   const boxKey = useRef('')
   useEffect(() => {
     if (!api) return
     const check = () => {
-      const el = hoveredIdRef.current ? api.getSceneElements().find((e) => e.id === hoveredIdRef.current) : null
-      const { scrollX, scrollY, zoom } = api.getAppState()
-      const key = el ? [el.x, el.y, el.width, el.height, el.isDeleted, scrollX, scrollY, zoom.value].join() : ''
+      const els = api.getSceneElements()
+      const st = api.getAppState()
+      const { scrollX, scrollY, zoom, selectedElementIds } = st
+      const ids = Object.keys(selectedElementIds).filter((id) => selectedElementIds[id])
+      const sel = ids.length === 1 ? els.find((e) => e.id === ids[0]) : null
+      const selId = isCodeBlock(sel) ? sel.id : null
+      if (selId !== selectedIdRef.current) { selectedIdRef.current = selId; setSelectedId(selId) }
+      const targetId = selId ?? hoveredIdRef.current
+      const el = targetId ? els.find((e) => e.id === targetId) : null
+      // While moving, no bar is drawn: leave position out of the key so drag frames don't re-render.
+      const key = !el ? '' : isMoving(st) ? `${el.id},moving` : [el.id, el.x, el.y, el.width, el.height, scrollX, scrollY, zoom.value].join()
       if (key !== boxKey.current) { boxKey.current = key; setTick((t) => t + 1) }
     }
     const offScroll = api.onScrollChange(check)
@@ -100,15 +112,19 @@ export function useCodeBlocks(api: ExcalidrawImperativeAPI | null) {
     pointer.current = p
     if (!api) return
     const st = api.getAppState() as any
-    if (st.selectedElementsAreBeingDragged || st.resizingElement || st.newElement) {
+    if (isMoving(st)) {
       if (hoveredIdRef.current) setHoveredId(null)
       return
     }
     const els = api.getSceneElements()
+    // The hit area reaches over the button bar (above, or below when flipped), so the pointer can travel to the buttons.
+    const reach = BAR_REACH / st.zoom.value
     let hit: string | null = null
     for (let i = els.length - 1; i >= 0; i--) {
       const e = els[i]
-      if (isCodeBlock(e) && p.x >= e.x && p.x <= e.x + e.width && p.y >= e.y && p.y <= e.y + e.height) { hit = e.id; break }
+      if (!isCodeBlock(e) || p.x < e.x || p.x > e.x + e.width) continue
+      const below = barBelow(e, st)
+      if (p.y >= e.y - (below ? 0 : reach) && p.y <= e.y + e.height + (below ? reach : 0)) { hit = e.id; break }
     }
     if (hit !== hoveredIdRef.current) setHoveredId(hit)
   }, [api])
@@ -138,15 +154,18 @@ export function useCodeBlocks(api: ExcalidrawImperativeAPI | null) {
     })
   }, [api, editor, run])
 
-  const hovered = api && hoveredId ? api.getSceneElements().find((e) => e.id === hoveredId) : null
+  const targetId = selectedId ?? hoveredId
+  const hovered = api && targetId ? api.getSceneElements().find((e) => e.id === targetId) : null
   let hoverUi: JSX.Element | null = null
-  if (api && isCodeBlock(hovered) && !editor) {
+  if (api && isCodeBlock(hovered) && !editor && !isMoving(api.getAppState())) {
     const appState = api.getAppState()
     const { x, y } = sceneCoordsToViewportCoords({ sceneX: hovered.x + hovered.width, sceneY: hovered.y }, appState)
+    const below = barBelow(hovered, appState)
+    const bottom = below ? sceneCoordsToViewportCoords({ sceneX: 0, sceneY: hovered.y + hovered.height }, appState).y : 0
     const view: CodeView = hovered.customData.view
     const other: CodeView = view === 'code' ? 'diagram' : 'code'
     hoverUi = (
-      <div className="codeblock-hover" data-testid="codeblock-hover" style={{ ...styles.hover, left: x, top: y }}
+      <div className="codeblock-hover" data-testid="codeblock-hover" data-block-id={hovered.id} style={{ ...styles.hover, left: x, ...(below ? { top: bottom + BAR_GAP, transform: 'translate(-100%, 0)' } : { top: y - BAR_GAP }) }}
         onPointerLeave={(e) => { if (!(e.relatedTarget as Element | null)?.closest?.('canvas')) setHoveredId(null) }}>
         <button style={styles.btn} disabled={busy} data-testid="codeblock-toggle"
           onClick={() => void run(() => updateBlock(api, hovered.id, { view: other }))}>
@@ -202,8 +221,23 @@ export function useCodeBlocks(api: ExcalidrawImperativeAPI | null) {
   return { onPaste, onPointerUpdate, onPointerLeave, toolbar, layer }
 }
 
+/** Excalidraw is moving, resizing or drawing an element: no buttons meanwhile. */
+function isMoving(st: any): boolean {
+  return !!(st.selectedElementsAreBeingDragged || st.resizingElement || st.newElement)
+}
+
+/** No room for the bar above the block (it is at the top edge of the canvas): the bar goes under it. */
+function barBelow(el: ExcalidrawElement, st: any): boolean {
+  return sceneCoordsToViewportCoords({ sceneX: el.x, sceneY: el.y }, st).y - BAR_REACH < (st.offsetTop ?? 0)
+}
+
+/** Screen px between the block's top edge and the button bar (clears Excalidraw's selection outline). */
+const BAR_GAP = 8
+/** Screen px above the block that still counts as hovering it: gap + bar height. */
+const BAR_REACH = BAR_GAP + 34
+
 const styles: Record<string, React.CSSProperties> = {
-  hover: { position: 'fixed', transform: 'translate(-100%, 0)', display: 'flex', gap: 4, padding: 4, zIndex: 10 },
+  hover: { position: 'fixed', transform: 'translate(-100%, -100%)', display: 'flex', gap: 4, padding: 4, zIndex: 10 },
   btn: { font: '12px system-ui, sans-serif', padding: '3px 8px', border: '1px solid #ced4da', borderRadius: 4, background: '#fff', color: '#212529', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,.15)' },
   primary: { background: '#4263eb', color: '#fff', borderColor: '#4263eb' },
   newBtn: { font: '12px system-ui, sans-serif', padding: '6px 10px', border: '1px solid #ced4da', borderRadius: 8, background: '#fff', color: '#212529', cursor: 'pointer' },
