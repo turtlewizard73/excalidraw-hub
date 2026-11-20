@@ -26,8 +26,12 @@ function fakeCanvas() {
     if (req.url === '/api/files' && req.method === 'GET') return send({ files: Object.fromEntries(state.files) });
     if (req.url === '/api/files' && req.method === 'POST') { for (const f of json.files) state.files.set(f.id, f); return send({ success: true }); }
     if (req.url === '/api/export/image') {
+      state.exports = (state.exports ?? 0) + 1;
+      const n = json.elements ? json.elements.length : state.elements.size; // a given scene, else the live canvas
+      const ids = json.elements && state.showIds ? json.elements.map((e) => e.id).sort().join(',') : '';
+      if (state.holdExport) await state.holdExport; // test hook: a slow render
       if (state.failExport) { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, error: 'render failed' })); }
-      return send({ success: true, format: 'png', data: Buffer.from(`PNG of ${state.elements.size}`).toString('base64') });
+      return send({ success: true, format: 'png', data: Buffer.from(`PNG of ${n}${ids ? ` [${ids}]` : ''}`).toString('base64') });
     }
     if (req.url === '/api/elements/batch') {
       if (state.failBatch) { res.writeHead(400, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, error: 'rejected' })); }
@@ -84,7 +88,7 @@ test('tree → load → clean → edit → dirty → save new version → clean'
 
   const load = await post('/api/load', at(BP));
   assert.equal(load.status, 200);
-  assert.deepEqual((await get('/api/status')), { current: current(BP), dirty: false, canvas: 'ok', elementCount: 2, agentElements: 2 });
+  assert.deepEqual((await get('/api/status')), { current: current(BP), dirty: false, canvas: 'ok', elementCount: 2, agentElements: 2, png: { pending: 0, error: null } });
 
   canvas.state.elements.set('c', rect('c', 50));
   assert.equal((await get('/api/status')).dirty, true);
@@ -742,4 +746,98 @@ test('a root-level _retired folder lists fine; moving a drawing into it is refus
   const res = await post('/api/move', { from: at(BP), to: { root: rid, dir: '_retired' } });
   assert.equal(res.status, 400);
   await fs.access(path.join(dir, BP));
+});
+
+// Background PNG renders (docs/specs/2026-11-19-png-off-the-switch-path.md).
+const held = () => { let release; const p = new Promise((r) => { release = r; }); return { p, release }; };
+const pngOf = (rel) => fs.readFile(path.join(dir, rel.replace(/\.excalidraw$/, '.png')), 'utf8').catch(() => null);
+const showIds = () => { canvas.state.showIds = true; };
+const until = async (fn, ms = 3000) => { const t = Date.now(); while (!(await fn())) { if (Date.now() - t > ms) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 10)); } };
+
+test('png background: the save returns before the render; the PNG shows the saved scene, not the canvas after it', async () => {
+  showIds();
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  const h = held(); canvas.state.holdExport = h.p;
+  const save = await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' })).json();
+  assert.equal(save.png, 'pending');
+  assert.equal((await get('/api/status')).png.pending, 1);
+  canvas.state.elements.clear(); // the canvas moves on (e.g. the next load) while the render runs
+  h.release();
+  await until(async () => (await get('/api/status')).png.pending === 0);
+  assert.equal(await pngOf(BP), 'PNG of 3 [a,b,c]');
+});
+
+test('png background: a dirty switch loads at once; the old drawing still gets its PNG', async () => {
+  showIds();
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  const h = held(); canvas.state.holdExport = h.p;
+  await fs.writeFile(path.join(dir, 'agents', 'agents_v0.excalidraw'), JSON.stringify({ elements: [rect('z')] }));
+  const load = await post('/api/load', at('agents/agents_v0.excalidraw'));
+  assert.equal(load.status, 200, 'the load does not wait for the render');
+  assert.deepEqual((await load.json()).autosaved, current(BP));
+  assert.deepEqual([...canvas.state.elements.keys()], ['z']);
+  h.release();
+  await until(async () => (await get('/api/status')).png.pending === 0);
+  assert.equal(await pngOf(BP), 'PNG of 3 [a,b,c]');
+});
+
+test('png background: only the newest render of a file writes it', async () => {
+  showIds();
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  const first = held(); canvas.state.holdExport = first.p;
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' });
+  await until(() => canvas.state.exports === 1);
+  canvas.state.holdExport = null;
+  canvas.state.elements.set('d', rect('d', 80));
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' });
+  await until(async () => (await pngOf(BP)) === 'PNG of 4 [a,b,c,d]');
+  first.release(); // the older render finishes last
+  await until(async () => (await get('/api/status')).png.pending === 0);
+  assert.equal(await pngOf(BP), 'PNG of 4 [a,b,c,d]');
+});
+
+test('png background: delete waits for a pending render, so no PNG comes back', async () => {
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  const h = held(); canvas.state.holdExport = h.p;
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' });
+  let deleted = false;
+  const del = post('/api/delete', at(BP)).then((r) => { deleted = true; return r; });
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(deleted, false, 'delete waits');
+  h.release();
+  assert.equal((await del).status, 200);
+  assert.deepEqual((await fs.readdir(path.join(dir, 'roadmap'))).sort(), []);
+});
+
+test('png background: a failed render shows in status until the next render of that file succeeds', async () => {
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  canvas.state.failExport = true;
+  assert.equal((await (await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' })).json()).png, 'pending');
+  await until(async () => (await get('/api/status')).png.error !== null);
+  const { error } = (await get('/api/status')).png;
+  assert.deepEqual({ root: error.root, path: error.path }, current(BP));
+  assert.match(error.error, /render failed/);
+  canvas.state.failExport = false;
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' });
+  await until(async () => (await get('/api/status')).png.pending === 0);
+  assert.equal((await get('/api/status')).png.error, null);
+});
+
+test('png: an unknown png mode is refused', async () => {
+  assert.equal((await post('/api/save', { root: rid, dir: 'roadmap', versioned: true, png: 'later' })).status, 400);
+});
+
+test('png background: deleting a drawing whose render failed clears the error', async () => {
+  await post('/api/load', at(BP));
+  canvas.state.elements.set('c', rect('c', 50));
+  canvas.state.failExport = true;
+  await post('/api/save', { root: rid, dir: 'roadmap', versioned: false, png: 'background' });
+  await until(async () => (await get('/api/status')).png.error !== null);
+  await post('/api/delete', at(BP));
+  assert.equal((await get('/api/status')).png.error, null);
 });

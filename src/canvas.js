@@ -25,9 +25,9 @@ export function createCanvas(baseUrl) {
     async elements() { return (await call('GET', '/api/elements')).elements ?? []; },
     async files() { return (await call('GET', '/api/files')).files ?? {}; },
 
-    /** The scene as PNG bytes, rendered by the canvas (headless node renderer; needs no browser tab). */
-    async exportPng() {
-      const { data } = await call('POST', '/api/export/image', { format: 'png' });
+    /** PNG bytes of `scene` ({elements, files}), or of the live canvas without one. Headless node renderer; needs no tab. */
+    async exportPng(scene) {
+      const { data } = await call('POST', '/api/export/image', scene ? { format: 'png', renderer: 'node', ...scene } : { format: 'png' });
       if (typeof data !== 'string' || !data) throw new CanvasError('canvas export returned no image');
       return Buffer.from(data.slice(data.indexOf(',') + 1), 'base64');
     },

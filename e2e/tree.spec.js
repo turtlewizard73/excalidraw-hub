@@ -61,14 +61,14 @@ test('new folder, and saves at depth 2 name the drawing after its folder', async
   // Nothing loaded from this folder: the stem is the folder's name, in a folder with no family yet.
   await pick(page, root, 'nested/fresh');
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved repo/nested/fresh/fresh_v0.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/nested/fresh/fresh_v0.excalidraw (.png rendering)');
   expect(exists('nested/fresh/fresh_v0.excalidraw')).toBe(true);
   expect(fs.readFileSync(path.join(DATA, 'nested/fresh/fresh_v0.png')).subarray(1, 4).toString()).toBe('PNG');
 
   // A family already there (deep_v0): the next version of the folder's name.
   await pick(page, root, 'nested/deep');
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved repo/nested/deep/deep_v1.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/nested/deep/deep_v1.excalidraw (.png rendering)');
   expect(exists('nested/deep/deep_v1.excalidraw')).toBe(true);
   expect(fs.readFileSync(path.join(DATA, 'nested/deep/deep_v1.png')).subarray(1, 4).toString()).toBe('PNG');
   await expect(drawing(page, root, 'nested/deep/deep_v1.excalidraw').locator('.tag')).toHaveText('latest');

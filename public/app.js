@@ -236,6 +236,10 @@ async function refreshStatus() {
     if (s.canvas !== 'ok') { badge.textContent = 'Canvas offline'; badge.className = 'badge offline'; badge.title = s.error ?? ''; }
     else if (state.dirty) { badge.textContent = '● Unsaved changes'; badge.className = 'badge dirty'; badge.title = ''; }
     else { badge.textContent = 'Saved'; badge.className = 'badge clean'; badge.title = ''; }
+    // A background PNG render failed: say so once per failure.
+    const pngError = s.png?.error ? `No .png for ${where(s.png.error)}: ${s.png.error.error}` : null;
+    if (pngError && pngError !== state.pngError) say(pngError, true);
+    state.pngError = pngError;
     if (changed) { await refreshTrees(); renderTree(); }
   } catch (e) { say(`Status failed: ${e.message}`, true); }
 }
@@ -260,12 +264,14 @@ async function save(ev) {
   if (!sel || !rootOf(sel.root)) return say('Save failed: pick a folder in the sidebar first (or attach one)', true);
   const versioned = ev.submitter?.dataset.action === 'version';
   try {
-    const res = await api('/api/save', { root: sel.root, dir: sel.path, label: $('save-label').value, versioned });
+    // The PNG renders after the response (docs/specs/2026-11-19-png-off-the-switch-path.md); a failure shows via status.
+    const res = await api('/api/save', { root: sel.root, dir: sel.path, label: $('save-label').value, versioned, png: 'background' });
     state.current = res.current;
     $('save-label').value = '';
     view.expanded.add(key(sel.root, sel.path));
     await refreshList();
-    say(`Saved ${where(res.current)}${res.png ? ' and its .png' : ` (no .png: ${res.pngError})`}`, !res.png);
+    const png = res.png === 'pending' ? ' (.png rendering)' : res.png ? ' and its .png' : ` (no .png: ${res.pngError})`;
+    say(`Saved ${where(res.current)}${png}`, !res.png);
     await refreshStatus();
   } catch (e) { fail('Save', e); }
 }

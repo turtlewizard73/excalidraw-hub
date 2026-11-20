@@ -54,9 +54,11 @@ export function inlineSymbolImages(svg: string): string {
   });
 }
 
-export function svgToPng(svg: string, options: PngOptions): PngResult {
-  const { Resvg } = loadResvg();
-  const resvg = new Resvg(inlineSymbolImages(svg), {
+// renderAsync parses and rasterizes on the libuv thread pool: a large scene takes seconds, and the
+// synchronous render() would block every other canvas request (load, sync) for that long.
+export async function svgToPng(svg: string, options: PngOptions): Promise<PngResult> {
+  const { renderAsync } = loadResvg();
+  const image = await renderAsync(inlineSymbolImages(svg), {
     fitTo: { mode: 'zoom', value: options.scale },
     font: {
       loadSystemFonts: options.loadSystemFonts,
@@ -65,6 +67,5 @@ export function svgToPng(svg: string, options: PngOptions): PngResult {
     },
     logLevel: 'off'
   });
-  const image = resvg.render();
   return { data: image.asPng(), width: image.width, height: image.height };
 }

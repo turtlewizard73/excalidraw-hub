@@ -976,7 +976,11 @@ const exportImageSchema = z.object({
   padding: z.number().min(0).optional(),
   elementIds: z.array(z.string()).min(1).optional(),
   frameId: z.string().optional(),
-  embedFonts: z.boolean().optional()
+  embedFonts: z.boolean().optional(),
+  // Render this scene instead of the live canvas (node renderer only). The hub sends a saved drawing,
+  // so a render that outlives the request does not picture whatever is loaded next.
+  elements: z.array(z.record(z.string(), z.any())).optional(),
+  files: z.record(z.string(), z.any()).optional()
 });
 type ExportImageBody = z.infer<typeof exportImageSchema>;
 
@@ -1040,7 +1044,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
         : `${where ? `${where}: ` : ''}${issue?.message ?? 'invalid request'}`
     });
   }
-  const options = parsed.data;
+  const { elements: givenElements, files: givenFiles, ...options } = parsed.data;
   const renderer = options.renderer ?? 'auto';
 
   const respondBrowser = async () => {
@@ -1055,11 +1059,16 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
     }
   };
 
-  if (renderer === 'browser') return respondBrowser();
+  if (renderer === 'browser') {
+    if (givenElements) return res.status(400).json({ success: false, error: 'elements: only the node renderer renders a given scene' });
+    return respondBrowser();
+  }
 
   try {
     const { renderer: _renderer, ...renderOptions } = options;
-    const scene = { elements: Array.from(elements.values()), files: Object.fromEntries(files) };
+    const scene = givenElements
+      ? { elements: givenElements, files: givenFiles ?? {} }
+      : { elements: Array.from(elements.values()), files: Object.fromEntries(files) };
     const result = await renderScene(scene, renderOptions);
     res.json({
       success: true,
@@ -1075,7 +1084,7 @@ app.post('/api/export/image', async (req: Request, res: Response) => {
       return res.status(error.status).json({ success: false, error: error.message });
     }
     logger.error('Headless image export failed:', error);
-    if (renderer === 'auto' && clients.size > 0) {
+    if (renderer === 'auto' && clients.size > 0 && !givenElements) {
       // The reference renderer is available; use it rather than fail
       logger.warn('Falling back to the browser tab for this export');
       return respondBrowser();

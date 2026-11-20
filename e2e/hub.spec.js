@@ -76,11 +76,11 @@ test('save: writes the next version into the selected folder with the edit and b
   const before = readDoc(P.v1).elements.length;
   await page.getByTestId('save-label').fill('E2E edit');
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved repo/roadmap/roadmap_v2_e2e_edit.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/roadmap/roadmap_v2_e2e_edit.excalidraw (.png rendering)');
   const saved = readDoc('roadmap/roadmap_v2_e2e_edit.excalidraw');
   expect(saved.elements.length).toBe(before + 1);
   expect(saved.elements.some((e) => 'syncedAt' in e || 'createdAt' in e)).toBe(false);
-  expect(exists('roadmap/roadmap_v2_e2e_edit.png')).toBe(true);
+  await expect.poll(() => exists('roadmap/roadmap_v2_e2e_edit.png')).toBe(true); // rendered after the save returns
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   await expect(drawing(page, root, 'roadmap/roadmap_v2_e2e_edit.excalidraw').locator('.tag')).toHaveText('latest');
   expect(readDoc(P.v1).elements.length).toBe(before);
@@ -92,7 +92,7 @@ test('save: image files, freedraw and appState survive load → edit → save', 
   await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save-version').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw (.png rendering)');
   const orig = readDoc('image-test/image-test_v0_red_png.excalidraw');
   const saved = readDoc('image-test/image-test_v1.excalidraw');
   expect(saved.files).toEqual(orig.files);
@@ -109,7 +109,7 @@ test('Save: overwrites the loaded drawing, adds no file, refuses to overwrite an
   await drawRectangle(page);
   await expect(page.getByTestId('dirty')).toHaveText('● Unsaved changes', { timeout: 8000 });
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved repo/image-test/image-test_v1.excalidraw (.png rendering)');
   await expect(page.getByTestId('dirty')).toHaveText('Saved');
   expect(readDoc(file).elements.length).toBe(before + 1);
   expect(fs.readdirSync(path.join(DATA, 'image-test')).sort()).toEqual(listed);

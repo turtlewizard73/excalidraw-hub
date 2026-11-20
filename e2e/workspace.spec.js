@@ -48,9 +48,9 @@ test('load and save in the attached folder write its files', async () => {
   const before = readDoc(NOTE, OTHER).elements.length;
   await drawRectangle(page);
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('message')).toHaveText('Saved other-repo/notes/notes_v0.excalidraw and its .png');
+  await expect(page.getByTestId('message')).toHaveText('Saved other-repo/notes/notes_v0.excalidraw (.png rendering)');
   expect(readDoc(NOTE, OTHER).elements.length).toBe(before + 1);
-  expect(exists('notes/notes_v0.png', OTHER)).toBe(true);
+  await expect.poll(() => exists('notes/notes_v0.png', OTHER)).toBe(true); // rendered after the save returns
 });
 
 test('detach: refused while its drawing is loaded', async () => {

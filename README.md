@@ -102,7 +102,7 @@ You may edit it while the hub is stopped, for example to keep a personal setup i
 - **Save** (optional label first): with no label it overwrites the loaded drawing, unless the canvas came back empty, lost an image, or the file changed on disk meanwhile. With a label, or with nothing loaded, it writes `<stem>[_<label>].excalidraw` and refuses if that file exists.
 - **Save new version** writes `<stem>_v<next>[_<label>].excalidraw` and never overwrites. `<next>` is one more than the stem's highest version in that folder, and `0` for a stem with no versions yet (the first version is `_v0`). For an unversioned loaded drawing, its whole name is the stem.
 - A stem must use letters, digits, `.`, `_` and `-` only; otherwise the save is refused and you rename the folder or the drawing. Loading still works.
-- Every save also writes `<name>.png` next to the drawing.
+- Every save also writes `<name>.png` next to the drawing. From the page it renders in the background, so saving and switching do not wait for it; a failed render shows in the message line. An API save waits for it unless it sends `"png": "background"`.
 - **Revert:** every overwrite first keeps the old file in `BACKUPS_DIR` (newest 20 per drawing). Revert puts the loaded drawing back to its previous saved state; press again to go further back. It asks first and keeps the file it replaces too.
 
 **Sync (⟳ on a folder inside a git repo).** It works in your own checkout; the folder you attached is that checkout.

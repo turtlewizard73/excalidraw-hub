@@ -16,6 +16,7 @@ const TMP_DIR = 'tmp'; // in the root of the drawing being opened: where unsaved
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
 const MAX_BODY = 64 * 1024;
+const MAX_SCENE_JSON = 9 * 1024 * 1024; // the canvas accepts 10 MB request bodies
 
 class HttpError extends Error { constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; } }
 
@@ -64,11 +65,43 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
   const liveCount = (elements) => elements.filter((e) => !e.isDeleted).length;
   // Identifies a canvas state: every element's id and last server-side change.
   const fingerprint = (elements) => elements.map((e) => `${e.id}@${e.updatedAt ?? ''}@${e.version ?? ''}`).sort().join('|');
-  const renderPng = async (store, rel, result) => {
-    // The PNG is a convenience: the drawing is already saved if rendering fails.
-    try { await store.writePng(rel, await canvas.exportPng()); result.png = true; } catch (e) { result.png = false; result.pngError = e.message; }
-    return result;
+  // PNG renders. The PNG is a convenience: the drawing is already saved if rendering fails. Each file has a
+  // generation counter, so only its newest render writes the PNG. Background renders return at once (png: "pending");
+  // file operations wait for them (pngIdle). Spec: docs/specs/2026-11-19-png-off-the-switch-path.md.
+  const png = { gen: new Map(), pending: new Set(), errors: new Map() };
+  // Until nothing is pending: a save outside the serial queue (during a sync) may start a render meanwhile.
+  const pngIdle = async () => { while (png.pending.size) await Promise.allSettled([...png.pending]); };
+  /** The file is gone from `rel` (renamed, moved, deleted): its render state goes too. No `rel`: the whole root. */
+  const forgetPng = (root, rel) => {
+    for (const m of [png.gen, png.errors]) for (const k of m.keys()) if (rel ? k === `${root}\n${rel}` : k.startsWith(`${root}\n`)) m.delete(k);
   };
+  function renderPng(root, rel, result, { doc = null, background = false } = {}) {
+    const key = `${root}\n${rel}`;
+    const gen = (png.gen.get(key) ?? 0) + 1;
+    png.gen.set(key, gen);
+    // The saved scene itself, so the PNG matches the file whatever the canvas shows by then. Too big for the
+    // canvas's 10 MB request limit: render the live canvas, waiting, as before.
+    let scene;
+    if (doc) {
+      const s = { elements: doc.elements, files: doc.files ?? {} };
+      if (Buffer.byteLength(JSON.stringify(s)) <= MAX_SCENE_JSON) scene = s;
+    }
+    const job = (async () => {
+      const bytes = await canvas.exportPng(scene);
+      // Else a newer render writes it, or the file was renamed, moved or deleted meanwhile (forgetPng).
+      if (png.gen.get(key) === gen) await folderOf(root).store.writePng(rel, bytes);
+    })();
+    const done = () => { if (png.gen.get(key) === gen) png.errors.delete(key); };
+    const failed = (e) => { if (png.gen.get(key) === gen) png.errors.set(key, { root, path: rel, error: e.message }); };
+    if (!background || !scene) {
+      return job.then(() => { done(); result.png = true; return result; },
+        (e) => { failed(e); result.png = false; result.pngError = e.message; return result; });
+    }
+    png.pending.add(job);
+    job.then(done, (e) => { failed(e); console.error(`png for ${rel} failed:`, e.message); }).finally(() => png.pending.delete(job));
+    result.png = 'pending';
+    return result;
+  }
 
   /** Put `doc` (the drawing `current`, stamped `stamp`) on the canvas and make it the baseline. */
   async function loadOntoCanvas(current, doc, stamp) {
@@ -80,13 +113,14 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
   }
 
   /** Save the canvas into folder `dir` of root `root`. Shared by POST /api/save and by a load that saves unsaved work first. */
-  async function saveCanvas({ root, dir = '', label, versioned }) {
+  async function saveCanvas({ root, dir = '', label, versioned, png: pngMode }) {
     const folder = folderOf(root);
     const { store, backups } = folder;
     str(dir, 'dir');
     if (label !== undefined && typeof label !== 'string') throw new HttpError(400, 'label must be a string');
     // Required: a page loaded before this flag existed must not overwrite by default.
     if (typeof versioned !== 'boolean') throw new HttpError(400, 'this page is out of date; reload it and save again');
+    if (pngMode !== undefined && pngMode !== 'background') throw new HttpError(400, 'png must be "background" or left out');
     let names;
     try { await store.entries(dir); names = await store.files(dir); } catch (e) { throw fsError(e); }
     // The stem: the loaded drawing's if it is in this folder, else the folder's own name.
@@ -116,7 +150,8 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       }
       baseline.set({ root, path: rel }, doc.elements, doc.appState, canvasNow);
       baseline.stamp = await store.stamp(rel);
-      return renderPng(store, rel, { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack });
+      return renderPng(root, rel, { current: baseline.current, elementCount: doc.elements.length, expanded: expanded.changed, writtenBack },
+        { doc, background: pngMode === 'background' });
     };
     // A new file must not inherit Revert backups of a deleted drawing that had the same name.
     const created = async (rel) => { await backups.retire(rel).catch(() => {}); return saved(rel); };
@@ -162,6 +197,8 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
     }
   }
 
+  const pngStatus = () => ({ pending: png.pending.size, error: [...png.errors.values()].at(-1) ?? null });
+
   const routes = {
     'GET /api/config': async () => ({ canvasUrl: canvasPublicUrl, canAttach: workspace.canAttach, recent: workspace.recent() }),
 
@@ -190,6 +227,8 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
     // In the queue: a load or save into this root must not run while it is being detached.
     'POST /api/folders/detach': serial(async ({ id }) => {
       if (baseline.current?.root === id) throw new HttpError(409, 'the loaded drawing is in this folder; load a drawing from another folder first');
+      await pngIdle();
+      forgetPng(id);
       try { const f = await workspace.detach(id); return { detached: { id: f.id, path: f.path }, recent: workspace.recent() }; } catch (e) { throw fsError(e); }
     }),
 
@@ -203,11 +242,11 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       try {
         const elements = await canvas.elements();
         return {
-          current: baseline.current, dirty: baseline.isDirty(elements), canvas: 'ok',
+          current: baseline.current, dirty: baseline.isDirty(elements), canvas: 'ok', png: pngStatus(),
           elementCount: liveCount(elements), agentElements: elements.filter(isAgentFormat).length,
         };
       } catch (e) {
-        return { current: baseline.current, dirty: null, canvas: 'unreachable', error: e.message };
+        return { current: baseline.current, dirty: null, canvas: 'unreachable', error: e.message, png: pngStatus() };
       }
     },
 
@@ -225,7 +264,7 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
             await store.mkdir(TMP_DIR).catch((e) => { if (e.status !== 409) throw e; });
             target = { root, dir: TMP_DIR, versioned: true };
           }
-          autosaved = (await saveCanvas(target)).current;
+          autosaved = (await saveCanvas({ ...target, png: 'background' })).current;
         } catch (e) {
           const err = fsError(e);
           if (!(err instanceof HttpError)) throw err;
@@ -246,12 +285,13 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       const { store, backups } = folderOf(root);
       if (!same(baseline.current, { root, path: str(rel, 'path') })) throw new HttpError(409, 'only the loaded drawing can be reverted; load it first');
       await store.read(rel).catch((e) => { throw fsError(e); });
+      await pngIdle();
       // Unsaved canvas work is saved over the file first, so it is kept: the revert below moves it to _reverted and
       // restores the newest backup, which that save just made of the last saved state. Net: the edits are dropped
       // from the drawing but not lost.
       const elements = await canvas.elements();
       if (baseline.isDirty(elements) && liveCount(elements) > 0) {
-        try { await saveCanvas({ root, dir: dirname(rel), versioned: false }); } catch (e) {
+        try { await saveCanvas({ root, dir: dirname(rel), versioned: false, png: 'background' }); } catch (e) {
           if (!(e instanceof HttpError)) throw e;
           throw new HttpError(e.status, `Your unsaved changes could not be saved, so nothing was reverted. ${e.message}`);
         }
@@ -265,14 +305,16 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       await store.overwrite(rel, backup.bytes);
       await backups.remove(rel, backup.name);
       await loadOntoCanvas({ root, path: rel }, doc, await store.stamp(rel));
-      return renderPng(store, rel, { current: baseline.current, restored: backup.name, remaining: await backups.count(rel) });
+      return renderPng(root, rel, { current: baseline.current, restored: backup.name, remaining: await backups.count(rel) }, { doc });
     }),
 
     'POST /api/rename': serial(async ({ root, path: rel, newBase }) => {
       const { store, backups } = folderOf(root);
       if (typeof newBase !== 'string' || !isSafeName(newBase)) throw new HttpError(400, `invalid new name: ${JSON.stringify(newBase)}`);
       const newRel = join(dirname(str(rel, 'path')), newBase + EXT);
+      await pngIdle();
       try { await store.rename(rel, newRel); } catch (e) { throw fsError(e); }
+      forgetPng(root, rel);
       if (same(baseline.current, { root, path: rel })) baseline.current = { root, path: newRel };
       await backups.move(rel, newRel).catch((e) => console.error('moving backups failed:', e.message));
       return { root, path: newRel, current: baseline.current };
@@ -287,7 +329,9 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       const newRel = join(str(to.dir ?? '', 'to.dir'), basename(rel));
       if (dest.backups.isReserved(newRel)) throw new HttpError(400, `${JSON.stringify(to.dir)} is a reserved folder name (_reverted, _retired at the top of a root); pick another folder`);
       if (src === dest && newRel === rel) return { moved: false, root: to.root, path: rel, current: baseline.current };
+      await pngIdle();
       try { await moveDrawing(src.store, rel, dest.store, newRel); } catch (e) { throw fsError(e); }
+      forgetPng(from.root, rel);
       await src.backups.move(rel, newRel, dest.backups).catch((e) => console.error('moving backups failed:', e.message));
       if (same(baseline.current, { root: from.root, path: rel })) {
         baseline.current = { root: to.root, path: newRel };
@@ -299,7 +343,9 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
     // Deleting the loaded drawing forgets the baseline: the canvas content now exists nowhere on disk, so it is unsaved.
     'POST /api/delete': serial(async ({ root, path: rel }) => {
       const { store, backups } = folderOf(root);
+      await pngIdle();
       try { await store.remove(str(rel, 'path')); } catch (e) { throw fsError(e); }
+      forgetPng(root, rel);
       if (same(baseline.current, { root, path: rel })) baseline.forget(); // keeps appState for the next save
       await backups.retire(rel).catch((e) => console.error('retiring backups failed:', e.message));
       return { deleted: { root, path: rel }, current: baseline.current };
@@ -313,6 +359,7 @@ export function createServer({ workspace, canvas, canvasPublicUrl, allowedHosts 
       const dir = path.relative(folder.repoDir, path.join(folder.path, ...(rel ? rel.split('/') : []))).split(path.sep).join('/');
       if (dir === '..' || dir.startsWith('../')) throw new HttpError(400, 'the folder is outside its repository');
       const answered = Array.isArray(confirm) ? confirm.filter((c) => c === 'branch') : [];
+      await pngIdle(); // a PNG still rendering would be committed stale
       try { return await folder.git.sync(dir, { confirm: answered, serial: serialRun }); } catch (e) {
         if (e instanceof GitError) throw new HttpError(500, e.message);
         throw e;
