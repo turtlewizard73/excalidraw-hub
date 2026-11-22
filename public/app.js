@@ -149,10 +149,10 @@ function renderHeader() {
     : 'No earlier saved state of the loaded drawing';
 }
 
-/** Fetch the roots, then every opened folder (and the loaded drawing's), so the tree is current. */
-async function refreshTrees() {
-  const wanted = new Set(view.expanded);
-  if (state.current) wanted.add(key(state.current.root, dirname(state.current.path)));
+/** Fetch every opened folder (and the loaded drawing's), or only the given keys, so the tree is current. */
+async function refreshTrees(only) {
+  const wanted = new Set(only ?? view.expanded);
+  if (!only && state.current) wanted.add(key(state.current.root, dirname(state.current.path)));
   await Promise.all([...wanted].map(async (k) => {
     const i = k.indexOf(':');
     const root = k.slice(0, i), path = k.slice(i + 1);
@@ -241,11 +241,21 @@ async function refreshStatus() {
     const pngError = s.png?.error ? `No .png for ${where(s.png.error)}: ${s.png.error.error}` : null;
     if (pngError && pngError !== state.pngError) say(pngError, true);
     state.pngError = pngError;
-    // A folder whose last fetch failed is retried on every poll; re-render only when something changed.
-    const errored = () => [...state.trees].filter(([, t]) => t.error).map(([k, t]) => `${k}=${t.error}`).join('\n');
-    const before = errored();
-    if (changed || before) { await refreshTrees(); if (changed || errored() !== before) renderTree(); }
+    if (changed) { await refreshTrees(); renderTree(); }
+    else await retryFailedTrees();
   } catch (e) { say(`Status failed: ${e.message}`, true); }
+}
+
+/** Re-fetch only the folders whose last fetch failed (one retry at a time); re-render when one changed. */
+let retrying = false;
+async function retryFailedTrees() {
+  const failed = [...state.trees].filter(([, t]) => t.error);
+  if (retrying || !failed.length) return;
+  retrying = true;
+  try {
+    await refreshTrees(failed.map(([k]) => k));
+    if (failed.some(([k, t]) => state.trees.get(k)?.error !== t.error)) renderTree();
+  } finally { retrying = false; }
 }
 
 // Unsaved changes are saved by the server first (into the loaded drawing, or tmp/); a refused save stops the load.
