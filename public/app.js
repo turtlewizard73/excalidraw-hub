@@ -19,7 +19,8 @@ const el = (tag, className = '', text = '') => Object.assign(document.createElem
 const currentDrawing = () => state.current && state.trees.get(key(state.current.root, dirname(state.current.path)))?.drawings?.find((d) => d.path === state.current.path);
 
 async function api(route, body) {
-  const res = await fetch(route, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  // Reads time out so a hung request cannot stall the page; POSTs (save, load, git sync) may legitimately take long.
+  const res = await fetch(route, body === undefined ? { signal: AbortSignal.timeout(10000) } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status, data });
   return data;
@@ -148,10 +149,10 @@ function renderHeader() {
     : 'No earlier saved state of the loaded drawing';
 }
 
-/** Fetch the roots, then every opened folder (and the loaded drawing's), so the tree is current. */
-async function refreshTrees() {
-  const wanted = new Set(view.expanded);
-  if (state.current) wanted.add(key(state.current.root, dirname(state.current.path)));
+/** Fetch every opened folder (and the loaded drawing's), or only the given keys, so the tree is current. */
+async function refreshTrees(only) {
+  const wanted = new Set(only ?? view.expanded);
+  if (!only && state.current) wanted.add(key(state.current.root, dirname(state.current.path)));
   await Promise.all([...wanted].map(async (k) => {
     const i = k.indexOf(':');
     const root = k.slice(0, i), path = k.slice(i + 1);
@@ -241,7 +242,20 @@ async function refreshStatus() {
     if (pngError && pngError !== state.pngError) say(pngError, true);
     state.pngError = pngError;
     if (changed) { await refreshTrees(); renderTree(); }
+    else await retryFailedTrees();
   } catch (e) { say(`Status failed: ${e.message}`, true); }
+}
+
+/** Re-fetch only the folders whose last fetch failed (one retry at a time); re-render when one changed. */
+let retrying = false;
+async function retryFailedTrees() {
+  const failed = [...state.trees].filter(([, t]) => t.error);
+  if (retrying || !failed.length) return;
+  retrying = true;
+  try {
+    await refreshTrees(failed.map(([k]) => k));
+    if (failed.some(([k, t]) => state.trees.get(k)?.error !== t.error)) renderTree();
+  } finally { retrying = false; }
 }
 
 // Unsaved changes are saved by the server first (into the loaded drawing, or tmp/); a refused save stops the load.
@@ -375,10 +389,23 @@ $('revert').addEventListener('click', revert);
 $('add-folder').addEventListener('click', attachFolder);
 $('collapse-all').addEventListener('click', () => { view.expanded = new Set(); saveView(); renderTree(); });
 
+/** First load. A failed request (hub restarting, Docker Desktop start) says so and retries, instead of leaving "Loading…". */
+async function boot() {
+  for (;;) {
+    try {
+      state.config = await api('/api/config');
+      if (!$('canvas').src) $('canvas').src = state.config.canvasUrl;
+      state.current = (await api('/api/status')).current; // so the first list can select the loaded drawing's folder
+      await refreshList();
+      return;
+    } catch (e) {
+      $('tree').textContent = `Hub not reachable, retrying… (${e.message})`;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 applyLayout();
-state.config = await api('/api/config');
-$('canvas').src = state.config.canvasUrl;
-state.current = (await api('/api/status')).current; // so the first list can select the loaded drawing's folder
-await refreshList();
+await boot();
 await refreshStatus();
 setInterval(refreshStatus, 2000);
