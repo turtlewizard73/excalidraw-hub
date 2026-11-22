@@ -19,7 +19,8 @@ const el = (tag, className = '', text = '') => Object.assign(document.createElem
 const currentDrawing = () => state.current && state.trees.get(key(state.current.root, dirname(state.current.path)))?.drawings?.find((d) => d.path === state.current.path);
 
 async function api(route, body) {
-  const res = await fetch(route, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  // Reads time out so a hung request cannot stall the page; POSTs (save, load, git sync) may legitimately take long.
+  const res = await fetch(route, body === undefined ? { signal: AbortSignal.timeout(10000) } : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status, data });
   return data;
@@ -240,7 +241,10 @@ async function refreshStatus() {
     const pngError = s.png?.error ? `No .png for ${where(s.png.error)}: ${s.png.error.error}` : null;
     if (pngError && pngError !== state.pngError) say(pngError, true);
     state.pngError = pngError;
-    if (changed) { await refreshTrees(); renderTree(); }
+    // A folder whose last fetch failed is retried on every poll; re-render only when something changed.
+    const errored = () => [...state.trees].filter(([, t]) => t.error).map(([k, t]) => `${k}=${t.error}`).join('\n');
+    const before = errored();
+    if (changed || before) { await refreshTrees(); if (changed || errored() !== before) renderTree(); }
   } catch (e) { say(`Status failed: ${e.message}`, true); }
 }
 
@@ -375,10 +379,23 @@ $('revert').addEventListener('click', revert);
 $('add-folder').addEventListener('click', attachFolder);
 $('collapse-all').addEventListener('click', () => { view.expanded = new Set(); saveView(); renderTree(); });
 
+/** First load. A failed request (hub restarting, Docker Desktop start) says so and retries, instead of leaving "Loading…". */
+async function boot() {
+  for (;;) {
+    try {
+      state.config = await api('/api/config');
+      if (!$('canvas').src) $('canvas').src = state.config.canvasUrl;
+      state.current = (await api('/api/status')).current; // so the first list can select the loaded drawing's folder
+      await refreshList();
+      return;
+    } catch (e) {
+      $('tree').textContent = `Hub not reachable, retrying… (${e.message})`;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 applyLayout();
-state.config = await api('/api/config');
-$('canvas').src = state.config.canvasUrl;
-state.current = (await api('/api/status')).current; // so the first list can select the loaded drawing's folder
-await refreshList();
+await boot();
 await refreshStatus();
 setInterval(refreshStatus, 2000);
